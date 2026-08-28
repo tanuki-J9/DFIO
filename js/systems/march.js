@@ -83,7 +83,7 @@ function triggerNode(s, at) {
 
 /* ============ 补给箱 ============ */
 
-function enterCrate(s, branch, at) {
+export function enterCrate(s, branch, at) {
   const run = s.run;
   const stats = squadCombatStats(s);
   const { tier, conf } = rollCrateTier(branch.crateTier, stats.crateTierBonus);
@@ -91,13 +91,16 @@ function enterCrate(s, branch, at) {
   // 搜刮耗时随箱体稀有度提升而增加，并受搜刮效率缩减
   const speedCut = clamp(stats.scavengeSpeed, 0, 0.75);
   const duration = Math.max(0.8, nonNeg(conf.duration, 3) * (1 - speedCut));
+  const lootConf = { rarity: conf.rarity, rolls: Math.max(1, tier), hafCoin: hafRangeByTier(tier) };
+  const pendingLoot = rollCrateLoot(lootConf, stats.lootBonus);
 
   run.node = {
     kind: NODE_TYPE.CRATE,
     tier,
     name: conf.name,
     rarity: conf.rarity,
-    duration
+    duration,
+    pendingLoot
   };
 
   setPhase(PHASE.SCAVENGE, { duration, at });
@@ -105,14 +108,17 @@ function enterCrate(s, branch, at) {
   pushFx('crate-open', { rarity: conf.rarity });
 }
 
-function finishCrate(s, at) {
+export function finishCrate(s, at) {
   const run = s.run;
   const node = run.node;
   if (!node) { startMarch(s, at); return; }
 
   const stats = squadCombatStats(s);
   const conf = { rarity: node.rarity, rolls: (node.tier || 1), hafCoin: hafRangeByTier(node.tier) };
-  const loot = rollCrateLoot({ ...conf, rolls: Math.max(1, node.tier) }, stats.lootBonus);
+  const loot = resolveCrateLoot(
+    node,
+    () => rollCrateLoot({ ...conf, rolls: Math.max(1, node.tier) }, stats.lootBonus)
+  );
   const gained = addToCarry(loot, s);
 
   run.counters.crates += 1;
@@ -124,6 +130,15 @@ function finishCrate(s, at) {
   loot.forEach((it) => pushFx('loot-pop', { text: `+${it.name}`, rarity: it.rarity }));
 
   startMarch(s, at);
+}
+
+/**
+ * 新节点在搜刮开始时已经确定物品，完成时只结算同一份结果。
+ * fallback 仅用于兼容更新前已经停留在搜刮阶段的旧存档。
+ */
+export function resolveCrateLoot(node, fallback) {
+  if (Array.isArray(node?.pendingLoot)) return node.pendingLoot;
+  return typeof fallback === 'function' ? fallback() : [];
 }
 
 function hafRangeByTier(tier) {

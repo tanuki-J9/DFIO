@@ -12,6 +12,7 @@ import { drainFx } from '../../systems/march.js';
 import { isWarning, extractProgress } from '../../systems/extraction.js';
 import { nodeLabel } from '../../systems/march.js';
 import { ensureSquadMembers } from '../../systems/operatorSkills.js';
+import { itemArt } from '../itemArt.js';
 
 let stageEl = null;
 let lastNodeKey = '';
@@ -79,17 +80,55 @@ function renderActors(s) {
   const life = ensureSquadMembers(run);
   const lifeById = new Map(life.map((m) => [m.id, m]));
   const key = `${run.squadSnapshot.map((o) => `${o.id}:${lifeById.get(o.id)?.downed ? 'down' : 'up'}`).join(',')}|${act}`;
-  if (key === lastSquadKey) return;
-  lastSquadKey = key;
-
   const members = run.squadSnapshot.length
     ? run.squadSnapshot
     : [{ id: 'unknown', role: 'assault', name: '干员' }];
 
-  box.innerHTML = members.map((op) => {
+  if (key !== lastSquadKey) {
+    lastSquadKey = key;
+    box.innerHTML = members.map((op) => actorMarkup(op, lifeById.get(op.id), act)).join('');
+  }
+
+  members.forEach((op) => {
     const member = lifeById.get(op.id);
-    const memberAct = member?.downed ? 'down' : act;
-    return `
+    const actor = box.querySelector(`[data-actor-id="${cssAttr(op.id)}"]`);
+    if (!actor || !member) return;
+    const ratio = member.maxHp > 0 ? member.hp / member.maxHp : 0;
+    const fill = actor.querySelector('.squad-hp-fill');
+    const nameplate = actor.querySelector('.squad-nameplate');
+    const value = actor.querySelector('.squad-hp-value');
+    const tone = healthTone(ratio, member.downed);
+    if (fill) {
+      fill.style.width = `${Math.max(0, Math.min(100, ratio * 100)).toFixed(1)}%`;
+      fill.classList.toggle('is-warning', tone === 'warning');
+      fill.classList.toggle('is-critical', tone === 'critical');
+    }
+    if (nameplate) {
+      nameplate.classList.toggle('is-warning', tone === 'warning');
+      nameplate.classList.toggle('is-critical', tone === 'critical');
+    }
+    if (value) value.textContent = member.downed ? '倒地' : `${Math.round(member.hp)}/${Math.round(member.maxHp)}`;
+  });
+}
+
+function cssAttr(value) {
+  return String(value ?? '').replace(/["\\]/g, '\\$&');
+}
+
+export function actorMarkup(op, member, act) {
+  const ratio = member?.maxHp > 0 ? member.hp / member.maxHp : 0;
+  const downed = Boolean(member?.downed);
+  const memberAct = downed ? 'down' : act;
+  const name = member?.name || op.name || '干员';
+  const tone = healthTone(ratio, downed);
+  const hpTone = tone === 'healthy' ? '' : ` is-${tone}`;
+  return `
+    <div class="squad-actor${downed ? ' is-downed' : ''}" data-actor-id="${esc(op.id)}">
+      <div class="squad-nameplate${hpTone}">
+        <div class="squad-name">${esc(name)}${downed ? ' · 倒地' : ''}</div>
+        <div class="squad-hp"><div class="squad-hp-fill${hpTone}" style="width:${Math.max(0, Math.min(100, ratio * 100)).toFixed(1)}%"></div></div>
+        <div class="squad-hp-value">${downed ? '倒地' : `${Math.round(member?.hp || 0)}/${Math.round(member?.maxHp || 0)}`}</div>
+      </div>
     <div class="sprite" data-role="${esc(op.role)}" data-act="${memberAct}" title="${esc(op.name)}${member?.downed ? ' · 倒地' : ''}">
       <div class="helmet"></div>
       <div class="head"></div>
@@ -100,8 +139,32 @@ function renderActors(s) {
       <div class="leg-l"></div>
       <div class="leg-r"></div>
     </div>
+    </div>
   `;
-  }).join('');
+}
+
+export function healthTone(ratio, downed = false) {
+  if (downed || ratio <= 0.25) return 'critical';
+  if (ratio <= 0.5) return 'warning';
+  return 'healthy';
+}
+
+const LOOT_REVEAL_POINTS = { common: 0.34, rare: 0.48, epic: 0.62, legend: 0.76, red: 0.9 };
+
+export function lootRevealAt(rarity) {
+  return LOOT_REVEAL_POINTS[rarity] ?? LOOT_REVEAL_POINTS.common;
+}
+
+export function lootSearchMarkup(items = [], progress = 0) {
+  const p = Math.max(0, Math.min(1, Number(progress) || 0));
+  return `<div class="loot-search-grid">${items.map((item) => {
+    const revealed = p >= lootRevealAt(item.rarity);
+    return `<div class="loot-search-slot bd-${esc(item.rarity || 'common')}" data-loot-uid="${esc(item.uid)}" data-revealed="${revealed ? '1' : '0'}">
+      ${revealed
+        ? `${itemArt(item, { size: 'sm', showLevel: true })}<span class="loot-search-name rar-${esc(item.rarity || 'common')}">${esc(item.name)}${item.count > 1 ? ` ×${item.count}` : ''}</span>`
+        : '<span class="loot-search-mask"><span class="loot-magnifier" aria-hidden="true"></span><span class="loot-searching">搜索中</span></span>'}
+    </div>`;
+  }).join('')}</div>`;
 }
 
 function actByPhase(run) {
@@ -143,6 +206,17 @@ function renderObjects(s, now) {
       crate.classList.toggle('opened', p >= 0.85);
       crate.classList.toggle('opening', p < 0.85);
     }
+    const items = Array.isArray(node?.pendingLoot) ? node.pendingLoot : [];
+    const grid = box.querySelector('.loot-search-grid');
+    if (grid && items.length) {
+      const p = phaseProgress(run, now);
+      Array.from(grid.children).forEach((slot, index) => {
+        const item = items[index];
+        if (!item || slot.dataset.revealed === '1' || p < lootRevealAt(item.rarity)) return;
+        slot.dataset.revealed = '1';
+        slot.innerHTML = `${itemArt(item, { size: 'sm', showLevel: true })}<span class="loot-search-name rar-${esc(item.rarity || 'common')}">${esc(item.name)}${item.count > 1 ? ` ×${item.count}` : ''}</span>`;
+      });
+    }
   }
 }
 
@@ -164,6 +238,7 @@ function buildObjects(run) {
       <div class="crate opening" data-rarity="${esc(node.rarity || 'common')}">
         <div class="lid"></div>
       </div>
+      ${lootSearchMarkup(node.pendingLoot || [], 0)}
     `;
   }
 

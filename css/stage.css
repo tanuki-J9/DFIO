@@ -129,8 +129,38 @@
   bottom: 16%;
   display: flex;
   align-items: flex-end;
-  gap: 14px;
+  gap: 4px;
+  z-index: 4;
 }
+
+.squad-actor {
+  position: relative;
+  width: 62px;
+  height: 55px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.squad-nameplate {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 62px;
+  transform: translateX(-50%);
+  text-align: center;
+  color: #d9d3bd;
+  text-shadow: 0 1px 3px #000;
+}
+
+.squad-name { font-size: 9px; line-height: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.squad-hp { height: 4px; margin-top: 2px; border: 1px solid rgba(200,255,61,.45); background: rgba(0,0,0,.65); }
+.squad-hp-fill { height: 100%; background: #8fd14f; transition: width .16s linear; }
+.squad-hp-fill.is-warning { background: #f1b944; }
+.squad-hp-fill.is-critical { background: #ff5c3d; }
+.squad-hp-value { margin-top: 1px; font-size: 7px; line-height: 8px; color: rgba(217,211,189,.7); }
+.squad-actor.is-downed .squad-nameplate { color: #ff765f; }
+.squad-actor.is-downed .squad-hp { border-color: rgba(255,92,61,.65); }
 
 .sprite {
   position: relative;
@@ -300,6 +330,50 @@
   transition: transform 0.4s ease-out;
 }
 .crate.opened .lid { transform: rotate(-72deg); }
+
+/* 搜刮格：所有格子同时扫描，达到各自稀有度阈值后揭晓 */
+.loot-search-grid {
+  position: absolute;
+  right: 7%;
+  top: 13%;
+  width: min(220px, 42%);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(48px, 1fr));
+  gap: 5px;
+  z-index: 3;
+}
+
+.loot-search-slot {
+  position: relative;
+  min-height: 58px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex-direction: column;
+  border: 1px solid rgba(217,211,189,.22);
+  background: rgba(8,12,10,.84);
+  overflow: hidden;
+}
+
+.loot-search-slot[data-revealed="1"] { animation: lootReveal .28s ease-out both; }
+.loot-search-name { max-width: 100%; font-size: 8px; line-height: 10px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.loot-search-mask { display: flex; flex-direction: column; align-items: center; gap: 4px; color: rgba(217,211,189,.5); }
+.loot-searching { font-size: 7px; letter-spacing: .08em; }
+.loot-magnifier { position: relative; width: 18px; height: 18px; border: 3px solid #8ecbd6; border-radius: 50%; animation: lootScan .72s linear infinite; }
+.loot-magnifier::after { content: ''; position: absolute; width: 8px; height: 3px; right: -7px; bottom: -4px; background: #8ecbd6; transform: rotate(45deg); transform-origin: left center; }
+
+@keyframes lootScan { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes lootReveal { from { opacity: .25; transform: scale(.88); filter: brightness(2); } to { opacity: 1; transform: scale(1); filter: brightness(1); } }
+
+@media (max-width: 640px) {
+  .actors { left: 2%; }
+  .squad-actor { width: 50px; }
+  .squad-nameplate { width: 50px; }
+  .loot-search-grid { right: 2%; top: 8%; width: 44%; grid-template-columns: repeat(2, minmax(42px, 1fr)); gap: 3px; }
+  .loot-search-slot { min-height: 42px; padding: 2px; }
+}
 
 /* ---------- 敌人 ---------- */
 .enemy {

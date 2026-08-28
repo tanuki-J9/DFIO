@@ -12,7 +12,7 @@ import { carrySummary } from '../../systems/loot.js';
 import { ammoView } from '../../systems/ammo.js';
 import { nodeLabel } from '../../systems/march.js';
 import { safeboxView } from '../../systems/safebox.js';
-import { ensureSquadMembers, reviveRuntimeView } from '../../systems/operatorSkills.js';
+import { reviveRuntimeView } from '../../systems/operatorSkills.js';
 import { progressBar, statCard, emptyState } from '../components.js';
 
 const LOG_STYLE = {
@@ -57,8 +57,6 @@ export function renderHeader(s, now) {
   const extracting = run.phase === PHASE.EXTRACTING;
   const exProg = extractProgress(s, now);
   const risky = isRisky(s, now);
-  const members = ensureSquadMembers(run);
-  const hpRatio = run.maxHp > 0 ? run.hp / run.maxHp : 0;
   const ammo = ammoView(run.ammo);
   const revive = reviveRuntimeView(run, now);
 
@@ -82,29 +80,6 @@ export function renderHeader(s, now) {
           height: 'h-2.5',
           label: `<span>时限进度</span><span>${fmtTime(left)} / ${fmtTime(run.timeLimit)}</span>`
         })}
-        ${progressBar({
-          ratio: hpRatio,
-          color: hpRatio > 0.5 ? 'bg-delta' : (hpRatio > 0.25 ? 'bg-amber-400' : 'bg-rust'),
-          height: 'h-2.5',
-          label: `<span>小队生命</span><span>${fmt(run.hp)} / ${fmt(run.maxHp)}</span>`
-        })}
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          ${members.map((m) => {
-            const ratio = m.maxHp > 0 ? m.hp / m.maxHp : 0;
-            return `
-              <div class="clip-tab bg-panel2 border ${m.downed ? 'border-rust/60' : 'border-line'} px-2.5 py-2">
-                <div class="flex items-center justify-between gap-2 text-[10px]">
-                  <span class="${m.downed ? 'text-rust' : 'text-sand/70'} truncate">${esc(m.name)}</span>
-                  <span class="${m.downed ? 'text-rust' : 'text-sand/45'}">${m.downed ? '倒地' : `${fmt(m.hp)}/${fmt(m.maxHp)}`}</span>
-                </div>
-                <div class="h-1.5 bg-black/30 mt-1.5 overflow-hidden">
-                  <div class="h-full ${m.downed ? 'bg-rust' : (ratio > 0.5 ? 'bg-delta' : (ratio > 0.25 ? 'bg-amber-400' : 'bg-rust'))}" style="width:${Math.max(0, Math.min(100, ratio * 100)).toFixed(1)}%"></div>
-                </div>
-              </div>`;
-          }).join('')}
-        </div>
-
         ${revive ? `
           <div class="clip-tab bg-fuchsia-400/10 border border-fuchsia-400/40 px-3 py-2">
             <div class="flex items-center justify-between text-[10px] gap-2">
