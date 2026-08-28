@@ -50,6 +50,128 @@ body {
 .bg-epic   { background: rgba(150, 80, 220, 0.12); }
 .bg-legend { background: rgba(220, 165, 50, 0.12); }
 
+/* 装备 / 弹药像素图：后续模板配置 image 或 imageUrl 时自动切换为真实图片 */
+.item-art {
+  --item-art-ink: #cdd6c4;
+  --item-art-dark: #111713;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(205, 214, 196, 0.24);
+  background-color: #182019;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 4px 4px;
+  image-rendering: pixelated;
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+}
+.item-art--sm { width: 24px; height: 24px; }
+.item-art--md { width: 38px; height: 38px; }
+.item-art--lg { width: 54px; height: 54px; }
+.rar-bg-common { --item-art-ink: #c2c9bd; background-color: #202720; }
+.rar-bg-rare { --item-art-ink: #75bfff; background-color: #172838; }
+.rar-bg-epic { --item-art-ink: #cb8cff; background-color: #281b38; }
+.rar-bg-legend { --item-art-ink: #ffd166; background-color: #382b15; }
+.rar-bg-red { --item-art-ink: #ff6464; background-color: #381717; }
+.item-art-shape,
+.item-art-detail,
+.item-art-shape::before,
+.item-art-shape::after,
+.item-art-detail::before,
+.item-art-detail::after {
+  position: absolute;
+  display: block;
+  content: '';
+  box-sizing: border-box;
+}
+.item-art-shape { inset: 0; }
+
+/* 枪械 */
+.item-art--weapon .item-art-shape::before {
+  width: 68%; height: 18%; left: 14%; top: 39%;
+  background: var(--item-art-ink);
+  box-shadow: 5px -4px 0 -2px var(--item-art-ink), -5px 4px 0 -2px var(--item-art-ink);
+}
+.item-art--weapon .item-art-shape::after {
+  width: 14%; height: 30%; left: 52%; top: 51%;
+  background: var(--item-art-ink);
+  transform: skew(-12deg);
+}
+.item-art--weapon .item-art-detail::before {
+  width: 20%; height: 8%; left: 19%; top: 58%; background: var(--item-art-ink);
+}
+
+/* 护甲 */
+.item-art--armor .item-art-shape::before {
+  width: 54%; height: 58%; left: 23%; top: 21%;
+  background: var(--item-art-ink);
+  clip-path: polygon(18% 0, 36% 10%, 64% 10%, 82% 0, 100% 23%, 84% 100%, 16% 100%, 0 23%);
+}
+.item-art--armor .item-art-shape::after {
+  width: 26%; height: 31%; left: 37%; top: 35%; background: var(--item-art-dark);
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--item-art-ink) 70%, transparent);
+}
+
+/* 头盔 */
+.item-art--helmet .item-art-shape::before {
+  width: 58%; height: 44%; left: 21%; top: 26%;
+  background: var(--item-art-ink);
+  clip-path: polygon(18% 0, 78% 0, 100% 34%, 90% 76%, 58% 76%, 58% 100%, 22% 100%, 0 62%, 4% 30%);
+}
+.item-art--helmet .item-art-shape::after {
+  width: 24%; height: 8%; right: 12%; top: 57%; background: var(--item-art-ink);
+}
+
+/* 背包 */
+.item-art--bag .item-art-shape::before {
+  width: 52%; height: 60%; left: 24%; top: 24%;
+  border: 4px solid var(--item-art-ink); background: var(--item-art-dark);
+}
+.item-art--bag .item-art-shape::after {
+  width: 34%; height: 12%; left: 33%; top: 15%;
+  border: 3px solid var(--item-art-ink); border-bottom: 0;
+}
+.item-art--bag .item-art-detail::before {
+  width: 32%; height: 13%; left: 34%; top: 58%; background: var(--item-art-ink);
+}
+
+/* 战术道具 */
+.item-art--tactical .item-art-shape::before,
+.item-art--equipment .item-art-shape::before {
+  width: 46%; height: 46%; left: 27%; top: 27%;
+  border: 4px solid var(--item-art-ink); transform: rotate(45deg);
+}
+.item-art--tactical .item-art-shape::after,
+.item-art--equipment .item-art-shape::after {
+  width: 10%; height: 10%; left: 45%; top: 45%; background: var(--item-art-ink);
+}
+
+/* 弹药盒与三枚弹头 */
+.item-art--ammo .item-art-shape::before {
+  width: 58%; height: 44%; left: 21%; top: 39%;
+  border: 3px solid var(--item-art-ink); background: var(--item-art-dark);
+}
+.item-art--ammo .item-art-shape::after {
+  width: 9%; height: 32%; left: 30%; top: 16%;
+  background: var(--item-art-ink);
+  box-shadow: 9px 0 0 var(--item-art-ink), 18px 0 0 var(--item-art-ink);
+  clip-path: polygon(50% 0, 100% 25%, 100% 100%, 0 100%, 0 25%);
+}
+.item-art-image {
+  width: 100%; height: 100%; display: block; object-fit: contain;
+  image-rendering: auto;
+}
+.item-art-level {
+  position: absolute; right: 2px; bottom: 2px; z-index: 2;
+  min-width: 12px; padding: 1px 2px;
+  color: #0b0e0c; background: var(--item-art-ink);
+  font-size: 8px; line-height: 1.1; font-weight: 700; text-align: center;
+}
+
 /* 视图切换：非活跃视图不参与渲染与动画 */
 .view { animation: viewIn 0.28s ease-out both; }
 .view.hidden { display: none !important; }

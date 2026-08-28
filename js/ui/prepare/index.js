@@ -15,6 +15,7 @@ import { operatorGearStats } from '../../systems/equipment.js';
 import { previewAmmoState, ROUNDS_FOR_FULL_RUN } from '../../systems/ammo.js';
 import { delegate, toast, statCard } from '../components.js';
 import { avatarArt } from '../pixelAvatar.js';
+import { itemArt, slotArt } from '../itemArt.js';
 import { renderMapPanel, selectBranch, openMapDifficulty, spawnSpotHit, openOpsCenter } from './mapPanel.js';
 import { renderOperatorPanel, handleToggleSquad, handleUpgradeOperator, handleRecruit, handleOperatorDetail, handleHiddenDetail } from './operatorPanel.js';
 import {
@@ -314,12 +315,12 @@ function renderBriefGear(s, stats) {
       const tpl = inst ? getTemplate(inst.tplId) : null;
       if (!tpl) {
         return `<span class="brief-gear brief-gear-empty clip-tab border border-dashed border-line bg-panel/50" title="${esc(slot.name)} 未装备">
-          <span class="brief-gear-icon opacity-30">${esc(slot.icon)}</span>
+          <span class="brief-gear-icon opacity-30">${slotArt(slot, { size: 'sm' })}</span>
         </span>`;
       }
       equipped += 1;
       return `<span class="brief-gear clip-tab border bd-${tpl.rarity} bg-panel2" title="${esc(tpl.name)} · ${esc(slot.name)}">
-        <span class="brief-gear-icon">${esc(slot.icon)}</span>
+        <span class="brief-gear-icon">${itemArt(tpl, { size: 'sm' })}</span>
       </span>`;
     }).join('');
 

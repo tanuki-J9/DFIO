@@ -19,6 +19,7 @@ import {
   ROUNDS_FOR_FULL_RUN, penetrationLabel
 } from '../../systems/ammo.js';
 import { avatarArt } from '../pixelAvatar.js';
+import { itemArt, slotArt } from '../itemArt.js';
 import { toast, emptyState, openPanel, delegate, statCard, confirmDialog } from '../components.js';
 
 let subTab = 'loadout';
@@ -59,7 +60,7 @@ export function renderEquipmentPanel() {
       ${SUB_TABS.map((t) => `
         <button data-action="eq-subtab" data-sub="${t.id}"
           class="btn clip-tab px-3 py-1.5 text-[11px] border ${subTab === t.id ? 'border-delta bg-delta/15 text-delta' : 'border-line bg-panel2 text-sand/60 hover:text-sand'}">
-          ${t.icon} ${esc(t.name)}
+          <span class="inline-flex items-center gap-1.5">${t.id === 'ammo' ? itemArt({ kind: 'ammo', name: t.name }, { size: 'sm', showLevel: false }) : t.icon} ${esc(t.name)}</span>
         </button>
       `).join('')}
     </div>
@@ -160,7 +161,7 @@ function renderSlotCard(row, opId) {
     <article class="clip-corner bg-panel border ${has ? `bd-${row.rarity}` : 'border-dashed border-line'} p-3">
       <header class="flex items-center justify-between gap-2 mb-2">
         <span class="flex items-center gap-1.5 text-[11px] text-sand/55">
-          <span class="text-base">${row.icon}</span>${esc(row.slotName)}
+          ${slotArt({ id: row.slot, name: row.slotName }, { size: 'sm' })}${esc(row.slotName)}
         </span>
         <span class="flex items-center gap-1.5 shrink-0">
           ${lv ? `<span class="text-[10px] px-1.5 py-0.5 border border-delta/50 text-delta clip-tab">${lv} 级</span>` : ''}
@@ -168,8 +169,13 @@ function renderSlotCard(row, opId) {
         </span>
       </header>
       ${has ? `
-        <p class="text-xs rar-${row.rarity} truncate">${esc(row.name)}</p>
-        <p class="text-[10px] text-sand/45 mt-0.5">${esc(RARITY_META[row.rarity].name)}</p>
+        <div class="flex items-center gap-3">
+          ${itemArt(tpl, { size: 'lg' })}
+          <div class="min-w-0">
+            <p class="text-xs rar-${row.rarity} truncate">${esc(row.name)}</p>
+            <p class="text-[10px] text-sand/45 mt-0.5">${esc(RARITY_META[row.rarity].name)}</p>
+          </div>
+        </div>
         <div class="grid grid-cols-3 gap-1 mt-2 text-[10px]">
           <span class="text-sand/45">攻 <span class="text-rust">${fmt(tpl.atk)}</span></span>
           <span class="text-sand/45">生 <span class="text-delta">${fmt(tpl.hp)}</span></span>
@@ -201,7 +207,7 @@ function renderAmmoPanel(s) {
     <div class="space-y-4">
       <section class="clip-corner bg-panel border border-delta/40 overflow-hidden">
         <header class="px-4 py-2.5 border-b border-line flex items-center justify-between gap-3">
-          <h3 class="text-xs text-delta tracking-wider">🧨 本轮携带弹药</h3>
+          <h3 class="text-xs text-delta tracking-wider flex items-center gap-2">${itemArt(pickedTpl ? { ...pickedTpl, kind: 'ammo' } : { kind: 'ammo', name: '弹药' }, { size: 'sm' })} 本轮携带弹药</h3>
           <span class="text-[10px] text-sand/40">弹药按发计数，不占装备槽、不计入战备</span>
         </header>
         <div class="p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -253,14 +259,19 @@ function renderAmmoPanel(s) {
             const on = picked.ammoId === t.id;
             return `
               <article class="clip-tab bg-panel2 border ${on ? 'border-delta' : `bd-${t.rarity}`} px-3 py-2.5">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="text-xs rar-${t.rarity} truncate">${esc(t.name)}</span>
-                  <span class="text-[10px] px-1.5 py-0.5 border border-delta/50 text-delta clip-tab shrink-0">${t.level} 级</span>
+                <div class="flex items-start gap-3">
+                  ${itemArt({ ...t, kind: 'ammo' }, { size: 'lg' })}
+                  <div class="min-w-0 grow">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="text-xs rar-${t.rarity} truncate">${esc(t.name)}</span>
+                      <span class="text-[10px] px-1.5 py-0.5 border border-delta/50 text-delta clip-tab shrink-0">${t.level} 级</span>
+                    </div>
+                    <p class="text-[10px] text-sand/45 mt-0.5">
+                      ${esc(RARITY_META[t.rarity].name)} · 单价 <span class="text-amber-400">${fmt(t.pricePerRound)}</span> / 发 · 攻 +${fmt(t.atk)}
+                    </p>
+                    <p class="text-[10px] text-sand/50 mt-1">库存 <span class="text-sky-400">${fmt(t.stock)}</span> 发</p>
+                  </div>
                 </div>
-                <p class="text-[10px] text-sand/45 mt-0.5">
-                  ${esc(RARITY_META[t.rarity].name)} · 单价 <span class="text-amber-400">${fmt(t.pricePerRound)}</span> / 发 · 攻 +${fmt(t.atk)}
-                </p>
-                <p class="text-[10px] text-sand/50 mt-1">库存 <span class="text-sky-400">${fmt(t.stock)}</span> 发</p>
                 <div class="flex flex-wrap gap-1.5 mt-2">
                   ${AMMO_PACK_SIZES.map((n) => `
                     <button data-action="ammo-buy" data-tpl="${t.id}" data-n="${n}"
@@ -316,18 +327,21 @@ export function openSlotPicker(slotId, opId = null) {
     <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
       ${list.map((it) => `
         <button data-action="pick-equip" data-uid="${it.uid}"
-          class="btn text-left clip-tab bg-panel2 border ${it.equipped ? 'border-delta' : `bd-${it.rarity}`} px-3 py-2 hover:brightness-125">
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-xs rar-${it.rarity} truncate">${esc(it.name)}</span>
-            <span class="text-[11px] text-delta shrink-0">+${fmt(it.value)}</span>
+          class="btn text-left clip-tab bg-panel2 border ${it.equipped ? 'border-delta' : `bd-${it.rarity}`} px-3 py-2 hover:brightness-125 flex items-start gap-3">
+          ${itemArt(getTemplate(it.tplId) || { ...it, slot: slotId }, { size: 'lg' })}
+          <div class="min-w-0 grow">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs rar-${it.rarity} truncate">${esc(it.name)}</span>
+              <span class="text-[11px] text-delta shrink-0">+${fmt(it.value)}</span>
+            </div>
+            <div class="grid grid-cols-4 gap-1 mt-1 text-[10px]">
+              <span class="text-sand/40">${esc(it.rarityName)}</span>
+              <span class="text-sand/45">攻 <span class="text-rust">${fmt(it.atk)}</span></span>
+              <span class="text-sand/45">生 <span class="text-delta">${fmt(it.hp)}</span></span>
+              <span class="text-sand/45">防 <span class="text-sky-400">${fmt(it.def)}</span></span>
+            </div>
+            ${it.equipped ? `<p class="text-[10px] text-delta mt-1">当前已装备</p>` : ''}
           </div>
-          <div class="grid grid-cols-4 gap-1 mt-1 text-[10px]">
-            <span class="text-sand/40">${esc(it.rarityName)}</span>
-            <span class="text-sand/45">攻 <span class="text-rust">${fmt(it.atk)}</span></span>
-            <span class="text-sand/45">生 <span class="text-delta">${fmt(it.hp)}</span></span>
-            <span class="text-sand/45">防 <span class="text-sky-400">${fmt(it.def)}</span></span>
-          </div>
-          ${it.equipped ? `<p class="text-[10px] text-delta mt-1">当前已装备</p>` : ''}
         </button>
       `).join('')}
     </div>
@@ -388,19 +402,24 @@ function renderInventory(s) {
 
       ${groups.map(({ slot, items }) => `
         <section>
-          <h3 class="text-xs text-delta tracking-wider mb-2">${slot.icon} ${esc(slot.name)} <span class="text-sand/35">(${items.length})</span></h3>
+          <h3 class="text-xs text-delta tracking-wider mb-2 flex items-center gap-2">${slotArt(slot, { size: 'sm' })} ${esc(slot.name)} <span class="text-sand/35">(${items.length})</span></h3>
           ${items.length ? `
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2">
               ${items.map((it) => `
                 <div class="clip-tab bg-panel2 border ${it.equipped ? 'border-delta' : `bd-${it.tpl.rarity}`} px-3 py-2">
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-xs rar-${it.tpl.rarity} truncate">${esc(it.tpl.name)}</span>
-                    <span class="text-[11px] text-delta shrink-0">+${fmt(it.tpl.value)}</span>
-                  </div>
-                  <div class="grid grid-cols-3 gap-1 mt-1 text-[10px]">
-                    <span class="text-sand/45">攻 <span class="text-rust">${fmt(it.tpl.atk)}</span></span>
-                    <span class="text-sand/45">生 <span class="text-delta">${fmt(it.tpl.hp)}</span></span>
-                    <span class="text-sand/45">防 <span class="text-sky-400">${fmt(it.tpl.def)}</span></span>
+                  <div class="flex items-start gap-3">
+                    ${itemArt(it.tpl, { size: 'lg' })}
+                    <div class="min-w-0 grow">
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="text-xs rar-${it.tpl.rarity} truncate">${esc(it.tpl.name)}</span>
+                        <span class="text-[11px] text-delta shrink-0">+${fmt(it.tpl.value)}</span>
+                      </div>
+                      <div class="grid grid-cols-3 gap-1 mt-1 text-[10px]">
+                        <span class="text-sand/45">攻 <span class="text-rust">${fmt(it.tpl.atk)}</span></span>
+                        <span class="text-sand/45">生 <span class="text-delta">${fmt(it.tpl.hp)}</span></span>
+                        <span class="text-sand/45">防 <span class="text-sky-400">${fmt(it.tpl.def)}</span></span>
+                      </div>
+                    </div>
                   </div>
                   <div class="flex gap-2 mt-2">
                     ${it.equipped
@@ -417,14 +436,17 @@ function renderInventory(s) {
       `).join('')}
 
       <section>
-        <h3 class="text-xs text-delta tracking-wider mb-2">🧨 弹药储备 <span class="text-sand/35">(${fmt(totalAmmoRounds(s))} 发)</span></h3>
+        <h3 class="text-xs text-delta tracking-wider mb-2 flex items-center gap-2">${itemArt({ kind: 'ammo', name: '弹药储备' }, { size: 'sm', showLevel: false })} 弹药储备 <span class="text-sand/35">(${fmt(totalAmmoRounds(s))} 发)</span></h3>
         ${totalAmmoRounds(s) > 0 ? `
           <div class="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-2">
             ${shopAmmoList(s).filter((t) => t.stock > 0).map((t) => `
-              <div class="clip-tab bg-panel2 border bd-${t.rarity} px-3 py-2">
-                <p class="text-xs rar-${t.rarity} truncate">${esc(t.name)}</p>
-                <p class="text-[10px] text-sand/45 mt-0.5">${t.level} 级 · ${fmt(t.stock)} 发</p>
-                <p class="text-[10px] text-delta mt-0.5">单价 ${fmt(t.pricePerRound)} / 发</p>
+              <div class="clip-tab bg-panel2 border bd-${t.rarity} px-3 py-2 flex items-center gap-2">
+                ${itemArt({ ...t, kind: 'ammo' }, { size: 'md' })}
+                <div class="min-w-0">
+                  <p class="text-xs rar-${t.rarity} truncate">${esc(t.name)}</p>
+                  <p class="text-[10px] text-sand/45 mt-0.5">${t.level} 级 · ${fmt(t.stock)} 发</p>
+                  <p class="text-[10px] text-delta mt-0.5">单价 ${fmt(t.pricePerRound)} / 发</p>
+                </div>
               </div>
             `).join('')}
           </div>
@@ -466,19 +488,24 @@ function renderShop(s) {
       弹药按发计价，请前往「弹药」页采购。当前持有 <span class="text-amber-400">${fmt(have)}</span> 哈夫币。
     </p>
 
-    <h3 class="text-xs text-delta tracking-wider mb-2">🔫 装备</h3>
+    <h3 class="text-xs text-delta tracking-wider mb-2 flex items-center gap-2">${slotArt({ id: 'weapon', name: '装备' }, { size: 'sm' })} 装备</h3>
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2 mb-5">
       ${eq.map((t) => `
         <div class="clip-tab bg-panel2 border bd-${t.rarity} px-3 py-2">
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-xs rar-${t.rarity} truncate">${esc(t.name)}</span>
-            <span class="text-[11px] text-delta shrink-0">+${fmt(t.value)}</span>
-          </div>
-          <p class="text-[10px] text-sand/45 mt-0.5">${esc(RARITY_META[t.rarity].name)} · ${esc(SLOTS.find((x) => x.id === t.slot)?.name || '')}</p>
-          <div class="grid grid-cols-3 gap-1 mt-1 text-[10px]">
-            <span class="text-sand/45">攻 <span class="text-rust">${fmt(t.atk)}</span></span>
-            <span class="text-sand/45">生 <span class="text-delta">${fmt(t.hp)}</span></span>
-            <span class="text-sand/45">防 <span class="text-sky-400">${fmt(t.def)}</span></span>
+          <div class="flex items-start gap-3">
+            ${itemArt(t, { size: 'lg' })}
+            <div class="min-w-0 grow">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs rar-${t.rarity} truncate">${esc(t.name)}</span>
+                <span class="text-[11px] text-delta shrink-0">+${fmt(t.value)}</span>
+              </div>
+              <p class="text-[10px] text-sand/45 mt-0.5">${esc(RARITY_META[t.rarity].name)} · ${esc(SLOTS.find((x) => x.id === t.slot)?.name || '')}</p>
+              <div class="grid grid-cols-3 gap-1 mt-1 text-[10px]">
+                <span class="text-sand/45">攻 <span class="text-rust">${fmt(t.atk)}</span></span>
+                <span class="text-sand/45">生 <span class="text-delta">${fmt(t.hp)}</span></span>
+                <span class="text-sand/45">防 <span class="text-sky-400">${fmt(t.def)}</span></span>
+              </div>
+            </div>
           </div>
           <button data-action="shop-buy-eq" data-tpl="${t.id}" ${have >= t.price ? '' : 'disabled'}
             class="btn w-full clip-tab text-[10px] py-1.5 mt-2 border border-amber-400/50 text-amber-400 hover:bg-amber-400/15">
