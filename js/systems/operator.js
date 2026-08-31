@@ -8,10 +8,11 @@ import {
   OPERATORS, ROLE_META, RARITY_META, SYNERGY,
   SQUAD_LIMIT, OPERATOR_MAX_LEVEL, OPERATOR_UPGRADE_COST, OPERATOR_LEVEL_GROWTH,
   ROLE_PASSIVE, SKILL_KIND_META, ROLE_PASSIVE_EFFECTS, ROLE,
-  getOperator
+  ACCOUNT_ATTACK_BONUS_CAP, getOperator
 } from '../config/index.js';
 import { getState, notify, spend } from '../core/state.js';
-import { nonNegInt, nonNeg } from '../core/utils.js';
+import { clamp, nonNegInt, nonNeg } from '../core/utils.js';
+import { baseBonuses, medicalHealBonus } from './base.js';
 import { loadoutStats } from './equipment.js';
 import { skillBonuses } from './skill.js';
 
@@ -216,6 +217,7 @@ export function squadCombatStats(s = getState()) {
   });
 
   const sk = skillBonuses(s);
+  const facility = s.run ? s.run.baseBonuses : baseBonuses(s);
 
   // 定位基础被动：只按实际上阵人数叠加，不计入战备。
   const roleCount = { [ROLE.ASSAULT]: 0, [ROLE.SUPPORT]: 0, [ROLE.ENGINEER]: 0, [ROLE.SCOUT]: 0 };
@@ -229,8 +231,10 @@ export function squadCombatStats(s = getState()) {
     reviveSpeed: roleCount[ROLE.SUPPORT] * nonNeg(ROLE_PASSIVE_EFFECTS[ROLE.SUPPORT]?.reviveSpeed, 0)
   };
 
-  const atk = Math.round(base.atk * (1 + syn.atk) * (1 + sk.atkPct));
-  const hp = Math.round(base.hp * (1 + syn.hp) * (1 + sk.hpPct));
+  const permanentAtkPct = Math.min(ACCOUNT_ATTACK_BONUS_CAP, nonNeg(sk.atkPct, 0));
+  const atk = Math.round(base.atk * (1 + syn.atk) * (1 + permanentAtkPct));
+  const hp = Math.round(base.hp * (1 + syn.hp) * (1 + sk.hpPct)
+    * (1 + nonNeg(facility?.medicalHpPct, 0)));
   const def = Math.round(base.def * (1 + syn.def) * (1 + sk.defPct));
 
   return {
@@ -241,13 +245,15 @@ export function squadCombatStats(s = getState()) {
     synergy: syn,
     skill: sk,
     /** 效率类修正：搜刮与撤离 */
-    scavengeSpeed: syn.scavenge + sk.scavengeSpeed,
+    scavengeSpeed: clamp(syn.scavenge + sk.scavengeSpeed
+      + nonNeg(facility?.scavengeSpeed, 0), 0, 0.75),
     extractSpeed: syn.extract + sk.extractSpeed,
     fireRate: sk.fireRate,
     bossDmgPct: sk.bossDmgPct,
-    regenPct: sk.regenPct,
+    medicalHealPct: medicalHealBonus(s, facility, sk),
     lootBonus: sk.lootBonus,
-    crateTierBonus: sk.crateTier + passive.crateTierBonus,
+    crateTierBonus: sk.crateTier + passive.crateTierBonus + nonNeg(facility?.crateTier, 0),
+    redWeightBonus: nonNeg(facility?.redWeightBonus, 0),
     marchSpeed: passive.marchSpeed,
     reviveSpeed: passive.reviveSpeed,
     rolePassive: passive,

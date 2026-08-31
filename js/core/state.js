@@ -4,8 +4,113 @@
  * 渲染层只消费此处数据，禁止反向写入演出结果（技术约束 5）
  */
 
-import { SLOT_IDS, SAFEBOX_BASE_SLOTS, LOG_LIMIT, INITIAL, getTemplate, getAmmo, AMMO_CARRY_MAX, getOperator, getCollectible } from '../config/index.js';
+import {
+  SLOT_IDS, SAFEBOX_BASE_SLOTS, LOG_LIMIT, INITIAL, getTemplate, getAmmo,
+  AMMO_CARRY_MAX, getOperator, getCollectible, FACILITY_ORDER,
+  COMMANDER_XP_PER_LEVEL, commanderLevelForXp
+} from '../config/index.js';
 import { nonNeg, nonNegInt, num, uid, deepClone } from './utils.js';
+
+const MAX_COMMANDER_XP = COMMANDER_XP_PER_LEVEL.reduce((sum, xp) => sum + xp, 0);
+
+function clampInt(value, min, max) {
+  const n = Number(value);
+  if (n === Number.POSITIVE_INFINITY) return max;
+  if (!Number.isFinite(n)) return min;
+  return Math.min(max, Math.max(min, Math.floor(n)));
+}
+
+function neutralFacilities() {
+  return Object.fromEntries(FACILITY_ORDER.map((id) => [id, 1]));
+}
+
+function currentCommanderXp(totalXp, level) {
+  if (level >= 30) return 0;
+  const spent = COMMANDER_XP_PER_LEVEL.slice(0, level - 1)
+    .reduce((sum, xp) => sum + xp, 0);
+  return totalXp - spent;
+}
+
+function sanitizeCommander(commander) {
+  const totalXp = clampInt(commander?.totalXp, 0, MAX_COMMANDER_XP);
+  const level = commanderLevelForXp(totalXp);
+  return { level, totalXp, currentXp: currentCommanderXp(totalXp, level) };
+}
+
+function sanitizeFacilities(facilities) {
+  const source = facilities && typeof facilities === 'object' ? facilities : {};
+  return Object.fromEntries(FACILITY_ORDER.map((id) => [id, clampInt(source[id], 1, 10)]));
+}
+
+function sanitizeLoadoutPresets(presets) {
+  if (!Array.isArray(presets)) return [];
+  return presets.slice(0, 3).map((preset) => {
+    if (!preset || typeof preset !== 'object' || Array.isArray(preset)) return null;
+    const source = preset.loadouts;
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+    const loadouts = {};
+    Object.entries(source).forEach(([opId, rawSlots]) => {
+      if (!opId || !rawSlots || typeof rawSlots !== 'object' || Array.isArray(rawSlots)) return;
+      const slots = {};
+      SLOT_IDS.forEach((slot) => {
+        if (!Object.hasOwn(rawSlots, slot)) return;
+        const value = rawSlots[slot];
+        if (value === null || typeof value === 'string') slots[slot] = value;
+      });
+      loadouts[opId] = slots;
+    });
+    return { loadouts };
+  });
+}
+
+function sanitizeBaseBonuses(baseBonuses) {
+  return baseBonuses && typeof baseBonuses === 'object' && !Array.isArray(baseBonuses)
+    ? { ...baseBonuses }
+    : {};
+}
+
+function sanitizeMedical(medical) {
+  const source = medical && typeof medical === 'object' ? medical : {};
+  const maxUses = clampInt(source.maxUses, 0, Number.MAX_SAFE_INTEGER);
+  return {
+    maxUses,
+    remainingUses: clampInt(source.remainingUses, 0, maxUses),
+    healRatio: Math.min(1, Math.max(0, num(source.healRatio, 0)))
+  };
+}
+
+function sanitizeMobility(mobility) {
+  const source = mobility && typeof mobility === 'object' ? mobility : {};
+  return {
+    remainingSkips: clampInt(source.remainingSkips, 0, Number.MAX_SAFE_INTEGER),
+    startPreviewNodes: clampInt(source.startPreviewNodes, 0, Number.MAX_SAFE_INTEGER)
+  };
+}
+
+function sanitizeLastSettlement(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out = deepClone(value);
+  for (const key of ['gainedItems', 'pendingItems', 'keptItems', 'lostItems']) {
+    out[key] = Array.isArray(out[key])
+      ? out[key].filter((item) => item && typeof item === 'object')
+      : [];
+  }
+  const pendingUids = new Set();
+  out.pendingItems = out.pendingItems.map((item, index) => {
+    const baseUid = typeof item.uid === 'string' && item.uid.trim()
+      ? item.uid
+      : `settlement-pending-${index + 1}`;
+    let itemUid = baseUid;
+    let suffix = 2;
+    while (pendingUids.has(itemUid)) {
+      itemUid = `${baseUid}-${suffix}`;
+      suffix += 1;
+    }
+    pendingUids.add(itemUid);
+    return { ...item, uid: itemUid };
+  });
+  return out;
+}
 
 /** 行动状态机枚举：准备 → 推进 → 搜刮 / 交战 → 撤离中 → 结算 */
 export const PHASE = {
@@ -62,6 +167,12 @@ export function createInitialState() {
     activeTab: 'map',
 
     currency: { hafCoin: INITIAL.hafCoin, deltaCoin: INITIAL.deltaCoin },
+
+    /** 指挥官累计经验为唯一可信来源；等级和当前经验由它推导。 */
+    commander: { level: 1, totalXp: 0, currentXp: 0 },
+
+    /** 特勤处七座设施均从 1 级开始。 */
+    base: { facilities: neutralFacilities(), loadoutPresets: [] },
 
     /** 永久仓库 */
     inventory,
@@ -147,7 +258,11 @@ function makeRunMembers(squadSnapshot, teamMaxHp, teamHp = teamMaxHp) {
 }
 
 /** 构造本轮行动运行时对象 */
-export function createRun({ mapId, difficulty, timeLimit, startedAt, squadSnapshot, loadoutSnapshot, maxHp, nodeGap, ammo, armorLevel }) {
+export function createRun({
+  mapId, difficulty, timeLimit, startedAt, squadSnapshot, loadoutSnapshot,
+  maxHp, nodeGap, ammo, armorLevel, bagCapacity, commanderXp, baseBonuses,
+  medical, mobility
+}) {
   return {
     id: uid('run'),
     mapId,
@@ -163,6 +278,8 @@ export function createRun({ mapId, difficulty, timeLimit, startedAt, squadSnapsh
 
     squadSnapshot: deepClone(squadSnapshot) || [],
     loadoutSnapshot: deepClone(loadoutSnapshot) || {},
+    /** 出发瞬间锁定的全队背包容量，行动中更换装备不会改变。 */
+    bagCapacity: Number.isFinite(bagCapacity) ? nonNegInt(bagCapacity, 0) : null,
 
     maxHp: nonNeg(maxHp, 1),
     hp: nonNeg(maxHp, 1),
@@ -176,6 +293,13 @@ export function createRun({ mapId, difficulty, timeLimit, startedAt, squadSnapsh
 
     /** 我方有效防护等级（护甲 / 头盔最高级），用于敌方子弹穿透计算 */
     armorLevel: Math.min(6, Math.max(1, nonNegInt(armorLevel, 1))),
+
+    /** 本轮经验与基地效果均在出发时快照，避免行动中受到永久状态变化影响。 */
+    commanderXp: nonNegInt(commanderXp, 0),
+    commanderXpSettled: false,
+    baseBonuses: sanitizeBaseBonuses(baseBonuses),
+    medical: sanitizeMedical(medical),
+    mobility: sanitizeMobility(mobility),
 
     distance: 0,
     nodeIndex: 0,
@@ -330,12 +454,23 @@ export function sanitizeState(s) {
   out.currency.hafCoin = nonNeg(s?.currency?.hafCoin, INITIAL.hafCoin);
   out.currency.deltaCoin = nonNeg(s?.currency?.deltaCoin, INITIAL.deltaCoin);
 
+  out.commander = sanitizeCommander(s.commander);
+  out.base.facilities = sanitizeFacilities(s?.base?.facilities);
+  out.base.loadoutPresets = sanitizeLoadoutPresets(s?.base?.loadoutPresets);
+
   out.inventory = Array.isArray(s.inventory)
-    ? s.inventory.filter((it) => it && getTemplate(it.tplId)).map((it) => ({
-        uid: String(it.uid || uid('eq')),
-        tplId: it.tplId,
-        slot: getTemplate(it.tplId).slot
-      }))
+    ? s.inventory.flatMap((it) => {
+        if (!it || typeof it !== 'object') return [];
+        const tplId = typeof it.tplId === 'string' ? it.tplId : '';
+        const tpl = getTemplate(tplId);
+        const legacySlot = SLOT_IDS.includes(it.slot) ? it.slot : null;
+        if (!tpl && (!tplId || getAmmo(tplId))) return [];
+        return [{
+          uid: String(it.uid || uid('eq')),
+          tplId,
+          slot: tpl?.slot || legacySlot || 'legacy'
+        }];
+      })
     : [];
 
   out.materials = {};
@@ -351,7 +486,7 @@ export function sanitizeState(s) {
   if (s.ammo && typeof s.ammo === 'object') {
     Object.entries(s.ammo).forEach(([k, v]) => {
       const n = nonNegInt(v, 0);
-      if (n > 0 && getAmmo(k)) out.ammo[k] = n;
+      if (n > 0) out.ammo[k] = n;
     });
   }
   // 旧版存档兼容：弹药曾是装备实例，按其原携带发数折算为发数储备
@@ -379,7 +514,7 @@ export function sanitizeState(s) {
     )
   };
 
-  const invIds = new Set(out.inventory.map((i) => i.uid));
+  const inventoryByUid = new Map(out.inventory.map((item) => [item.uid, item]));
 
   out.collectibles = {};
   if (s.collectibles && typeof s.collectibles === 'object') {
@@ -428,7 +563,8 @@ export function sanitizeState(s) {
     const slots = emptySlots();
     SLOT_IDS.forEach((slot) => {
       const val = source?.[slot];
-      if (val && invIds.has(val) && !claimed.has(val)) {
+      const item = val ? inventoryByUid.get(val) : null;
+      if (item?.slot === slot && !claimed.has(val)) {
         slots[slot] = val;
         claimed.add(val);
       }
@@ -470,6 +606,7 @@ export function sanitizeState(s) {
     out.run = null;
     out.view = VIEW.PREPARE;
   }
+  out.lastSettlement = out.run ? null : sanitizeLastSettlement(s.lastSettlement);
 
   if (s.stats && typeof s.stats === 'object') {
     Object.keys(out.stats).forEach((k) => { out.stats[k] = nonNegInt(s.stats[k], 0); });
@@ -499,6 +636,7 @@ function sanitizeRun(r) {
     phaseDuration: nonNeg(r.phaseDuration, 3),
     squadSnapshot: Array.isArray(r.squadSnapshot) ? r.squadSnapshot : [],
     loadoutSnapshot: r.loadoutSnapshot && typeof r.loadoutSnapshot === 'object' ? r.loadoutSnapshot : {},
+    bagCapacity: Number.isFinite(r.bagCapacity) ? nonNegInt(r.bagCapacity, 0) : null,
     maxHp,
     hp: Math.min(maxHp, Math.max(0, nonNeg(r.hp, maxHp))),
     members: (() => {
@@ -528,6 +666,11 @@ function sanitizeRun(r) {
       spent: nonNegInt(r?.ammo?.spent, 0)
     },
     armorLevel: Math.min(6, Math.max(1, nonNegInt(r.armorLevel, 1))),
+    commanderXp: nonNegInt(r.commanderXp, 0),
+    commanderXpSettled: !!r.commanderXpSettled,
+    baseBonuses: sanitizeBaseBonuses(r.baseBonuses),
+    medical: sanitizeMedical(r.medical),
+    mobility: sanitizeMobility(r.mobility),
     distance: nonNeg(r.distance, 0),
     nodeIndex: nonNegInt(r.nodeIndex, 0),
     nodeGap: Math.max(0.5, nonNeg(r.nodeGap, 3)),

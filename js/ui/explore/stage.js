@@ -149,6 +149,20 @@ export function healthTone(ratio, downed = false) {
   return 'healthy';
 }
 
+export function medicalUsesText(run) {
+  const maxUses = Math.floor(nonNeg(run?.medical?.maxUses, 0));
+  if (maxUses <= 0) return '';
+  const remainingUses = Math.min(maxUses, Math.floor(nonNeg(run?.medical?.remainingUses, 0)));
+  return `急救包 ${remainingUses}/${maxUses}`;
+}
+
+export function medicalFxText(fx) {
+  const amount = Math.round(nonNeg(fx?.amount, 0));
+  const maxUses = Math.floor(nonNeg(fx?.maxUses, 0));
+  const remainingUses = Math.min(maxUses, Math.floor(nonNeg(fx?.remainingUses, 0)));
+  return `急救 +${amount} · 剩余 ${remainingUses}/${maxUses}`;
+}
+
 const LOOT_REVEAL_POINTS = { common: 0.34, rare: 0.48, epic: 0.62, legend: 0.76, red: 0.9 };
 
 export function lootRevealAt(rarity) {
@@ -325,6 +339,12 @@ function buildFxElement(fx) {
       el.style.left = '12%';
       el.style.bottom = '46%';
       break;
+    case 'medical-heal':
+      el.className = 'fx fx-medical';
+      el.textContent = medicalFxText(fx);
+      el.style.left = '12%';
+      el.style.bottom = '46%';
+      break;
     case 'heal-enemy':
       el.className = 'fx fx-heal';
       el.textContent = `敌方 +${fx.amount}${fx.reduced ? '（减疗）' : ''}`;
@@ -428,8 +448,9 @@ function renderBadge(s, now) {
   const badge = document.getElementById('stage-badge');
   const phase = document.getElementById('stage-phase');
   const text = nodeLabel(run);
+  const medical = medicalUsesText(run);
   if (badge) badge.textContent = text;
-  if (phase) phase.textContent = `${text} · 已推进 ${run.nodeIndex} 个节点`;
+  if (phase) phase.textContent = `${text}${medical ? ` · ${medical}` : ''} · 已推进 ${run.nodeIndex} 个节点`;
 }
 
 /** 当前阶段进度条 */

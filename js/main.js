@@ -14,6 +14,8 @@ import { settle } from './systems/settlement.js';
 import { makeSquadSnapshot, squadCombatStats } from './systems/operator.js';
 import { makeLoadoutSnapshot } from './systems/equipment.js';
 import { makeAmmoState, squadArmorLevel } from './systems/ammo.js';
+import { squadBagCapacity } from './systems/readiness.js';
+import { baseBonuses, makeMedicalRunSnapshot, makeMobilityRunSnapshot } from './systems/base.js';
 import { toast } from './ui/components.js';
 import { mountTopbar, renderTopbar } from './ui/topbar.js';
 import { registerView, switchTo, renderCurrent, syncViewFromState } from './ui/router.js';
@@ -61,7 +63,11 @@ function launchRun() {
     maxHp: stats.hp,
     nodeGap: branch.nodeGap,
     ammo: makeAmmoState(s),
-    armorLevel: squadArmorLevel(loadoutSnapshot, s.inventory)
+    armorLevel: squadArmorLevel(loadoutSnapshot, s.inventory),
+    bagCapacity: squadBagCapacity(s),
+    baseBonuses: baseBonuses(s),
+    medical: makeMedicalRunSnapshot(loadoutSnapshot, s),
+    mobility: makeMobilityRunSnapshot(s)
   });
   s.view = VIEW.EXPLORE;
 

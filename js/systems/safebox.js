@@ -8,10 +8,12 @@ import { getState, notify } from '../core/state.js';
 import { nonNeg, nonNegInt, uid } from '../core/utils.js';
 import { skillBonuses } from './skill.js';
 import { LOOT_KIND } from './loot.js';
+import { baseBonuses } from './base.js';
 
-/** 当前保险箱容量 = 基础格数 + 技能扩容 */
+/** 当前保险箱容量 = 基础格数 + 旧技能扩容 + 仓储中心里程碑扩容 */
 export function capacity(s = getState()) {
-  const bonus = nonNegInt(skillBonuses(s).safeboxSlot, 0);
+  const bonus = nonNegInt(skillBonuses(s).safeboxSlot, 0)
+    + nonNegInt(baseBonuses(s).safeboxSlots, 0);
   return SAFEBOX_BASE_SLOTS + bonus;
 }
 
@@ -51,7 +53,7 @@ export function candidates(s = getState()) {
   const stored = new Set((s.safebox.items || []).map((it) => it.srcUid).filter(Boolean));
 
   const equipment = s.inventory
-    .filter((it) => !equippedUids.has(it.uid) && !stored.has(it.uid))
+    .filter((it) => !!getTemplate(it.tplId) && !equippedUids.has(it.uid) && !stored.has(it.uid))
     .map((it) => {
       const tpl = getTemplate(it.tplId);
       return {
@@ -105,6 +107,7 @@ export function depositEquipment(instUid, s = getState()) {
   if (already) return { ok: false, msg: '该装备已在保险箱中' };
 
   const tpl = getTemplate(inst.tplId);
+  if (!tpl) return { ok: false, msg: '未知旧版装备无法存入保险箱' };
   s.safebox.items.push({
     uid: uid('sb'),
     srcUid: inst.uid,

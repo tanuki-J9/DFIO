@@ -92,6 +92,31 @@ export const ENEMY_TIERS = {
   5: { name: '异化个体', atk: 140, hp: 2800, def: 68, level: 5, lootTier: RARITY.EPIC }
 };
 
+/** 同档敌人随机战斗侧重；机密以上不再每次生成完全相同的三围。 */
+export const ENEMY_VARIANTS = {
+  1: [{ id: 'standard', name: '标准', atkMul: 1, hpMul: 1, defMul: 1 }],
+  2: [
+    { id: 'raider', name: '突击型', atkMul: 1.18, hpMul: 0.92, defMul: 0.9 },
+    { id: 'guard', name: '防卫型', atkMul: 0.92, hpMul: 1.14, defMul: 1.2 },
+    { id: 'veteran', name: '老兵型', atkMul: 1.06, hpMul: 1.06, defMul: 1.06 }
+  ],
+  3: [
+    { id: 'hunter', name: '猎手型', atkMul: 1.24, hpMul: 0.96, defMul: 0.92 },
+    { id: 'heavy', name: '重装型', atkMul: 0.94, hpMul: 1.24, defMul: 1.28 },
+    { id: 'tactical', name: '战术型', atkMul: 1.1, hpMul: 1.1, defMul: 1.12 }
+  ],
+  4: [
+    { id: 'executioner', name: '处决型', atkMul: 1.32, hpMul: 1, defMul: 0.94 },
+    { id: 'bulwark', name: '壁垒型', atkMul: 0.96, hpMul: 1.34, defMul: 1.36 },
+    { id: 'specialist', name: '特战型', atkMul: 1.16, hpMul: 1.16, defMul: 1.18 }
+  ],
+  5: [
+    { id: 'apex', name: '极限火力', atkMul: 1.42, hpMul: 1.05, defMul: 1 },
+    { id: 'fortress', name: '移动堡垒', atkMul: 1, hpMul: 1.45, defMul: 1.46 },
+    { id: 'mutant', name: '强化异变', atkMul: 1.24, hpMul: 1.25, defMul: 1.24 }
+  ]
+};
+
 /** 精英单位：战力稍强于普通单位 */
 export const ELITE_TIERS = {
   1: { atkMul: 1.5, hpMul: 1.8, defMul: 1.6, levelUp: 0, lootTier: RARITY.RARE },

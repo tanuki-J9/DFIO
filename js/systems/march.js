@@ -4,7 +4,7 @@
  */
 
 import {
-  getBranch, ENEMY_TIERS, ELITE_TIERS, OPERATOR_TIERS, BOSS_TIERS,
+  getBranch, ENEMY_TIERS, ENEMY_VARIANTS, ELITE_TIERS, OPERATOR_TIERS, BOSS_TIERS,
   ELITE_CHANCE, OPERATOR_CHANCE, ENEMY_CLASS, ENEMY_SKILLS, ENEMY_GEAR_LEVELS,
   getEnemyArt, EQUIPMENT_TEMPLATES, AMMO_TEMPLATES, LEVELED_SLOTS,
   COMBAT, FX_LIMIT, DIFFICULTY_META, clampGearLevel, penetrationMul
@@ -16,13 +16,14 @@ import { squadCombatStats } from './operator.js';
 import {
   tickMarchOperatorSkills, tickCombatOperatorSkills, enemyDisabled,
   ensureSquadMembers, activeMembers, squadIsWiped, selectEnemyTarget,
-  memberSmokeEvade, applyMemberDamage, syncSquadHp
+  memberSmokeEvade, applyMemberDamage, syncSquadHp, tryAutoMedical
 } from './operatorSkills.js';
 import { rollCrateTier, rollCrateLoot, rollKillLoot, addToCarry, lootKindLabel } from './loot.js';
 import { takeNextNode } from './nodePlan.js';
 import {
   hasAmmo, consumeAmmo, shotMultiplier, ROUNDS_PER_TICK, targetArmorLevel
 } from './ammo.js';
+import { addRunXp } from './commander.js';
 
 export const NODE_TYPE = { CRATE: 'crate', ENEMY: 'enemy', BOSS: 'boss' };
 
@@ -51,21 +52,59 @@ export function currentBranch(s = getState()) {
   return getBranch(run.mapId, run.difficulty);
 }
 
-/** 进入推进状态并设定到下一节点的耗时 */
-export function startMarch(s = getState(), at = Date.now()) {
+/** Calculate one snapshotted node-to-node march gap, including normal variance. */
+function marchTiming(s = getState()) {
+  const run = s.run;
+  if (!run) return { duration: 0, minimumDuration: 0 };
+  const stats = squadCombatStats(s);
+  const facilitySpeed = nonNeg(run.baseBonuses?.marchSpeed, 0);
+  const marchCut = clamp(nonNeg(stats.marchSpeed, 0) + facilitySpeed, 0, 0.5);
+  const minGap = clamp(nonNeg(run.baseBonuses?.minNodeGap, 0.6), 0.5, 0.6);
+  const rawDuration = nonNeg(run.nodeGap, 3) * randFloat(0.85, 1.15);
+  return {
+    duration: Math.max(minGap, rawDuration * (1 - marchCut)),
+    // Facility, role-passive, and active movement effects all share this
+    // total reduction cap and the same Mobility-dependent hard floor.
+    minimumDuration: Math.max(minGap, rawDuration * 0.5)
+  };
+}
+
+export function marchDuration(s = getState()) {
+  return marchTiming(s).duration;
+}
+
+function scheduleMarch(s, at, { clearNode }) {
   const run = s.run;
   if (!run) return;
-  const stats = squadCombatStats(s);
-  const marchCut = clamp(nonNeg(stats.marchSpeed, 0), 0, 0.65);
-  const gap = Math.max(0.6, nonNeg(run.nodeGap, 3) * (1 - marchCut) * randFloat(0.85, 1.15));
-  run.node = null;
+  const timing = marchTiming(s);
+  if (!run.skillRuntime || typeof run.skillRuntime !== 'object') {
+    run.skillRuntime = { cooldowns: {}, status: {}, casts: 0 };
+  }
+  if (!run.skillRuntime.status || typeof run.skillRuntime.status !== 'object') {
+    run.skillRuntime.status = {};
+  }
+  run.skillRuntime.status.marchTiming = {
+    minimumDuration: timing.minimumDuration,
+    activeCutMs: 0
+  };
+  if (clearNode) run.node = null;
   if (run.phase === PHASE.MARCH) {
     run.phaseStartedAt = at;
-    run.phaseDuration = gap;
+    run.phaseDuration = timing.duration;
     notify();
   } else {
-    setPhase(PHASE.MARCH, { duration: gap, at });
+    setPhase(PHASE.MARCH, { duration: timing.duration, at });
   }
+}
+
+/** 进入推进状态并设定到下一节点的耗时 */
+export function startMarch(s = getState(), at = Date.now()) {
+  scheduleMarch(s, at, { clearNode: true });
+}
+
+/** Resume node movement after extraction without changing non-march timers. */
+export function resumeMarch(s = getState(), at = Date.now()) {
+  scheduleMarch(s, at, { clearNode: false });
 }
 
 /** 触发一个新节点 */
@@ -92,7 +131,7 @@ export function enterCrate(s, branch, at) {
   const speedCut = clamp(stats.scavengeSpeed, 0, 0.75);
   const duration = Math.max(0.8, nonNeg(conf.duration, 3) * (1 - speedCut));
   const lootConf = { rarity: conf.rarity, rolls: Math.max(1, tier), hafCoin: hafRangeByTier(tier) };
-  const pendingLoot = rollCrateLoot(lootConf, stats.lootBonus);
+  const pendingLoot = rollCrateLoot(lootConf, stats.lootBonus, stats.redWeightBonus);
 
   run.node = {
     kind: NODE_TYPE.CRATE,
@@ -117,17 +156,24 @@ export function finishCrate(s, at) {
   const conf = { rarity: node.rarity, rolls: (node.tier || 1), hafCoin: hafRangeByTier(node.tier) };
   const loot = resolveCrateLoot(
     node,
-    () => rollCrateLoot({ ...conf, rolls: Math.max(1, node.tier) }, stats.lootBonus)
+    () => rollCrateLoot(
+      { ...conf, rolls: Math.max(1, node.tier) },
+      stats.lootBonus,
+      stats.redWeightBonus
+    )
   );
   const gained = addToCarry(loot, s);
+  const accepted = run.carry.lastAccepted || loot;
+  const rejected = run.carry.lastRejected || [];
 
   run.counters.crates += 1;
   s.stats.crates += 1;
   s.stats.totalLoot += gained;
 
-  const names = loot.map((it) => `${lootKindLabel(it)}·${it.name}${it.count > 1 ? `×${it.count}` : ''}`).join('、');
-  pushLog('loot', `${node.name}搜刮完成：${names}（+${Math.round(gained)} 价值）`);
-  loot.forEach((it) => pushFx('loot-pop', { text: `+${it.name}`, rarity: it.rarity }));
+  const names = accepted.map((it) => `${lootKindLabel(it)}·${it.name}${it.count > 1 ? `×${it.count}` : ''}`).join('、');
+  const full = rejected.length ? `；背包已满，放弃 ${rejected.length} 项` : '';
+  pushLog('loot', `${node.name}搜刮完成：${names || '未能装入物品'}（+${Math.round(gained)} 价值）${full}`);
+  accepted.forEach((it) => pushFx('loot-pop', { text: `+${it.name}`, rarity: it.rarity }));
 
   startMarch(s, at);
 }
@@ -201,15 +247,23 @@ function enemyArmorLevel(tier, bonus = 0) {
  */
 function buildEnemy(mapId, branch, cls) {
   const tier = branch.enemyTier;
-  const base = ENEMY_TIERS[tier] || ENEMY_TIERS[1];
+  const rawBase = ENEMY_TIERS[tier] || ENEMY_TIERS[1];
+  const variant = pick(ENEMY_VARIANTS[tier] || ENEMY_VARIANTS[1]);
+  const base = {
+    ...rawBase,
+    atk: Math.round(rawBase.atk * (variant?.atkMul || 1)),
+    hp: Math.round(rawBase.hp * (variant?.hpMul || 1)),
+    def: Math.round(rawBase.def * (variant?.defMul || 1))
+  };
   const art = getEnemyArt(mapId);
+  const variantName = tier >= 2 && variant?.name ? ` · ${variant.name}` : '';
 
   if (cls === ENEMY_CLASS.BOSS) {
     const boss = BOSS_TIERS[tier] || BOSS_TIERS[1];
     const hp = Math.round(nonNeg(base.hp, 1) * boss.hpMul);
     return {
       cls,
-      name: pick(art.boss.names) || boss.name,
+      name: `${pick(art.boss.names) || boss.name}${variantName}`,
       art: art.boss.art || '',
       atk: Math.round(nonNeg(base.atk, 1) * boss.atkMul),
       hp,
@@ -254,7 +308,7 @@ function buildEnemy(mapId, branch, cls) {
     const name = pick(art.operator.names) || '敌方干员';
     return {
       cls,
-      name: size > 1 ? `${name} 小队（${size} 人）` : name,
+      name: `${size > 1 ? `${name} 小队（${size} 人）` : name}${variantName}`,
       art: art.operator.art || '',
       squadSize: size,
       atk: tuned.atk,
@@ -278,7 +332,7 @@ function buildEnemy(mapId, branch, cls) {
     const hp = Math.round(nonNeg(base.hp, 1) * conf.hpMul);
     return {
       cls,
-      name: pick(art.elite.names) || '精英单位',
+      name: `${pick(art.elite.names) || '精英单位'}${variantName}`,
       art: art.elite.art || '',
       atk: Math.round(nonNeg(base.atk, 1) * conf.atkMul),
       hp,
@@ -300,7 +354,7 @@ function buildEnemy(mapId, branch, cls) {
   const hp = nonNeg(base.hp, 1);
   return {
     cls: ENEMY_CLASS.NORMAL,
-    name: pick(art.normal.names) || base.name,
+    name: `${pick(art.normal.names) || base.name}${variantName}`,
     art: art.normal.art || '',
     atk: nonNeg(base.atk, 1),
     hp,
@@ -326,9 +380,23 @@ function rollEnemyClass(branch) {
   return ENEMY_CLASS.NORMAL;
 }
 
+/** Consume one snapshotted quick-pass charge only for a selected normal enemy. */
+export function shouldSkipNormalEnemy(run, enemyClass) {
+  if (enemyClass !== ENEMY_CLASS.NORMAL) return false;
+  const remaining = Math.floor(nonNeg(run?.mobility?.remainingSkips, 0));
+  if (remaining <= 0) return false;
+  run.mobility.remainingSkips = remaining - 1;
+  return true;
+}
+
 function enterCombat(s, branch, isBoss, at) {
   const run = s.run;
   const cls = isBoss ? ENEMY_CLASS.BOSS : rollEnemyClass(branch);
+  if (shouldSkipNormalEnemy(run, cls)) {
+    pushLog('info', `机动中心快速通过普通敌人（剩余 ${run.mobility.remainingSkips} 次）。`);
+    startMarch(s, at);
+    return;
+  }
   const enemy = buildEnemy(run.mapId, branch, cls);
   const stats = squadCombatStats(s);
   const interval = Math.max(
@@ -489,6 +557,18 @@ function tickCombat(s, now) {
     const hit = applyMemberDamage(run, target, inc, roundAt);
     if (i < 3) pushFx('hit-squad', { amount: hit.damage, targetId: target.id, downed: hit.downed });
 
+    // 伤害已经同步到逐人/全队生命后再判断；离线补算的同一个 tick 也最多消耗一次。
+    const medical = tryAutoMedical(run, now);
+    if (medical.used) {
+      pushLog('skill', `急救包自动治疗 ${medical.amount} 点生命（剩余 ${run.medical.remainingUses}/${run.medical.maxUses} 次）。`);
+      pushFx('medical-heal', {
+        amount: medical.amount,
+        targetId: medical.targetId,
+        remainingUses: run.medical.remainingUses,
+        maxUses: run.medical.maxUses
+      });
+    }
+
     // 敌方医疗技能：每回合治疗自身，露娜探测箭的减疗会真实压低该恢复量。
     if (enemy.hp > 0 && enemy.hp < enemy.maxHp && nonNeg(enemy.healPct, 0) > 0) {
       const reduction = clamp(nonNeg(enemy.healReduction, 0), 0, 0.95);
@@ -522,6 +602,11 @@ function onEnemyKilled(s, enemy, stats, now) {
     run.counters.eliteKills = nonNeg(run.counters.eliteKills, 0) + 1;
   }
 
+  const killXp = enemy.cls === ENEMY_CLASS.BOSS ? 50
+    : enemy.cls === ENEMY_CLASS.OPERATOR ? 20
+      : enemy.cls === ENEMY_CLASS.ELITE ? 10 : 2;
+  addRunXp('kill', killXp, s);
+
   const loot = rollKillLoot(
     enemy.lootTier,
     {
@@ -530,27 +615,17 @@ function onEnemyKilled(s, enemy, stats, now) {
       isOperator: enemy.cls === ENEMY_CLASS.OPERATOR,
       carried: enemy.carried || []
     },
-    stats.lootBonus
+    stats.lootBonus,
+    stats.redWeightBonus
   );
   const gained = addToCarry(loot, s);
+  const accepted = run.carry.lastAccepted || loot;
+  const rejected = run.carry.lastRejected || [];
   s.stats.totalLoot += gained;
 
-  // 战地自救：击杀后只恢复仍存活干员；倒地者必须通过救助/蝶大招归队。
-  const regen = clamp(stats.regenPct, 0, 0.5);
-  if (regen > 0) {
-    let healed = 0;
-    activeMembers(run).forEach((member) => {
-      const amount = Math.round(member.maxHp * regen);
-      const actual = Math.min(amount, Math.max(0, member.maxHp - member.hp));
-      member.hp += actual;
-      healed += actual;
-    });
-    syncSquadHp(run);
-    if (healed > 0) pushFx('heal', { amount: healed });
-  }
-
-  const names = loot.map((it) => `${lootKindLabel(it)}·${it.name}${it.count > 1 ? `×${it.count}` : ''}`).join('、');
-  pushLog(enemy.isBoss ? 'boss' : 'kill', `击杀${enemy.name}，缴获：${names}（+${Math.round(gained)} 价值）`);
+  const names = accepted.map((it) => `${lootKindLabel(it)}·${it.name}${it.count > 1 ? `×${it.count}` : ''}`).join('、');
+  const full = rejected.length ? `；背包已满，放弃 ${rejected.length} 项` : '';
+  pushLog(enemy.isBoss ? 'boss' : 'kill', `击杀${enemy.name}，缴获：${names || '未能装入物品'}（+${Math.round(gained)} 价值）${full}`);
   pushFx('enemy-die', { boss: enemy.isBoss });
 
   startMarch(s, now);

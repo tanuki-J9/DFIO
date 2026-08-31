@@ -4,12 +4,16 @@
  * 关闭后调用 dismissSettlement()，由 syncViewFromState 自动回到作战准备视图（需求 4.8）
  */
 
-import { getMap, DIFFICULTY_META, RARITY_META } from '../config/index.js';
+import {
+  getMap, COMMANDER_XP_PER_LEVEL, DIFFICULTY_META, RARITY_META
+} from '../config/index.js';
 import { getState } from '../core/state.js';
 import { fmt, fmtTime, esc } from '../core/utils.js';
 import { lootKindLabel } from '../systems/loot.js';
-import { dismissSettlement } from '../systems/settlement.js';
-import { openPanel, emptyState } from './components.js';
+import {
+  dismissSettlement, resolveSettlementOverflow, settlementOverflowActionState
+} from '../systems/settlement.js';
+import { openPanel, emptyState, toast } from './components.js';
 
 let shownFor = null;
 let closing = false;
@@ -17,7 +21,8 @@ let closing = false;
 /** 结算记录的唯一签名，避免同一份结算重复弹窗 */
 function signature(r) {
   if (!r) return null;
-  return [r.mapId, r.difficulty, r.success ? 1 : 0, r.reason || '-', r.duration, r.gainedValue, r.keptValue, r.lostValue].join('|');
+  const pending = (r.pendingItems || []).map((item) => item?.uid || '-').join(',');
+  return [r.mapId, r.difficulty, r.success ? 1 : 0, r.reason || '-', r.duration, r.gainedValue, r.keptValue, r.lostValue, pending].join('|');
 }
 
 function rarityCls(rarity) {
@@ -87,7 +92,38 @@ function readinessCompare(r) {
     </div>`;
 }
 
-function bodyHtml(r) {
+/** 指挥官经验结算与下一级进度。 */
+function commanderXpProgress(r) {
+  const xp = r.commanderXp || {};
+  const earned = Math.max(0, Number(xp.earned) || 0);
+  const applied = Math.max(0, Number(xp.applied) || 0);
+  const beforeLevel = Math.max(1, Number(xp.beforeLevel) || 1);
+  const level = Math.max(1, Math.min(30, Number(xp.afterLevel) || beforeLevel));
+  const totalXp = Math.max(0, Number(xp.totalXp) || 0);
+  const spent = COMMANDER_XP_PER_LEVEL.slice(0, level - 1).reduce((sum, n) => sum + n, 0);
+  const needed = level >= 30 ? 0 : COMMANDER_XP_PER_LEVEL[level - 1];
+  const current = level >= 30 ? 0 : Math.max(0, totalXp - spent);
+  const ratio = needed > 0 ? Math.max(0, Math.min(1, current / needed)) : 1;
+  const levelUp = level > beforeLevel
+    ? `<span class="text-emerald-400 font-bold">等级提升 ${beforeLevel} → ${level}</span>`
+    : `<span>指挥官等级 ${level}</span>`;
+  const capped = earned > applied ? ` · 满级上限仅计入 ${fmt(applied)}` : '';
+  const progress = level >= 30 ? '已达到最高等级' : `${fmt(current)} / ${fmt(needed)}`;
+
+  return `
+    <div class="rounded-lg border border-delta/40 bg-delta/10 px-3 py-3">
+      <div class="flex items-center justify-between gap-3 text-sm">
+        <div>${levelUp}</div>
+        <div class="text-delta font-bold">+${fmt(earned)} XP<span class="text-[11px] text-sand/50 font-normal">${capped}</span></div>
+      </div>
+      <div class="flex items-center gap-3 mt-2">
+        <div class="flex-1 bar-track"><div class="bar-fill bg-delta" style="width:${(ratio * 100).toFixed(1)}%"></div></div>
+        <div class="text-[11px] text-sand/60 shrink-0">${progress}</div>
+      </div>
+    </div>`;
+}
+
+export function renderSettlementBody(r) {
   const map = getMap(r.mapId);
   const diff = DIFFICULTY_META[r.difficulty];
   const mapName = map ? esc(map.name) : '未知区域';
@@ -105,9 +141,15 @@ function bodyHtml(r) {
          <div class="text-[11px] text-sand/55 mt-1.5">撤离失败仅保留保险箱内的物品，其余携带物资与所携装备全部损失。</div>
        </div>`;
 
+  const pending = Array.isArray(r.pendingItems) ? r.pendingItems.filter(Boolean) : [];
   const stats = [
     statBlock({ label: '本轮搜集价值', value: fmt(r.gainedValue), sub: '含补给箱与击杀掉落', tone: 'text-sand' }),
-    statBlock({ label: r.success ? '实际入库价值' : '保险箱保住价值', value: fmt(r.success ? r.gainedValue : r.keptValue), sub: r.success ? '全额入库' : '仅保险箱内物品', tone: 'text-emerald-400' }),
+    statBlock({
+      label: r.success ? '实际入库价值' : '保险箱保住价值',
+      value: fmt(r.keptValue),
+      sub: r.success && pending.length ? `${fmt(pending.length)} 项等待处理` : (r.success ? '已入仓库' : '仅保险箱内物品'),
+      tone: 'text-emerald-400'
+    }),
     statBlock({ label: '损失价值', value: fmt(r.lostValue), sub: r.success ? '无损失' : '含所携装备', tone: r.lostValue > 0 ? 'text-rust' : 'text-sand/60' }),
     statBlock({ label: '哈夫币收入', value: fmt(r.hafCoinGained), sub: r.success ? '已计入账户' : '失败不结算', tone: 'text-delta' })
   ].join('');
@@ -128,12 +170,49 @@ function bodyHtml(r) {
   const leftTitle = r.success ? '入库清单' : '保险箱保住';
   const leftItems = r.success ? r.gainedItems : r.keptItems;
   const leftEmpty = r.success ? '本轮没有搜集到任何物资' : '保险箱内没有物品';
+  const overflow = pending.length ? `
+    <section class="rounded-lg border border-amber-400/50 bg-amber-400/10 px-3 py-3">
+      <div class="flex items-center justify-between gap-3 mb-2">
+        <div>
+          <div class="text-sm font-bold text-amber-400">待处理撤离物资</div>
+          <div class="text-[11px] text-sand/55 mt-0.5">仓库容量不足。每项必须入库、出售或丢弃后才能关闭结算。</div>
+        </div>
+        <span class="text-xs text-amber-400 shrink-0">${fmt(pending.length)} 项 · ${fmt(r.overflowValue)} 价值</span>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        ${pending.map((item) => {
+          const actions = settlementOverflowActionState(item, pending, getState());
+          const locked = actions.protectedRed && actions.consumableCount <= 0;
+          const partial = actions.protectedRed && actions.protectedCount > 0 && actions.consumableCount > 0;
+          const disabled = locked
+            ? 'disabled aria-disabled="true" title="首件大红受收藏保护，必须入库"'
+            : '';
+          const protection = locked
+            ? '<div class="text-[11px] text-amber-300 mt-1">🔒 首件大红保护 · 必须入库（满仓可保护入库）</div>'
+            : partial
+              ? `<div class="text-[11px] text-amber-300 mt-1">🔒 首件保留 · 可处理重复件 ${fmt(actions.consumableCount)}</div>`
+              : '';
+          return `
+            <div class="flex flex-wrap items-center gap-2 px-2 py-2 bg-panel2/70 border border-line/60">
+              <div class="min-w-0 grow">${itemRow(item, 'text-amber-400')}${protection}</div>
+              <button type="button" data-settle-overflow="store" data-uid="${esc(item.uid)}"
+                class="btn clip-tab px-2 py-1 text-[10px] border border-delta/50 text-delta">尝试入库</button>
+              <button type="button" data-settle-overflow="sell" data-uid="${esc(item.uid)}" ${disabled}
+                class="btn clip-tab px-2 py-1 text-[10px] border border-amber-400/50 text-amber-400 disabled:opacity-40">${partial ? '出售重复件' : '出售'}</button>
+              <button type="button" data-settle-overflow="discard" data-uid="${esc(item.uid)}" ${disabled}
+                class="btn clip-tab px-2 py-1 text-[10px] border border-rust/50 text-rust disabled:opacity-40">${partial ? '丢弃重复件' : '丢弃'}</button>
+            </div>`;
+        }).join('')}
+      </div>
+    </section>` : '';
 
   return `
     <div class="flex flex-col gap-4">
       ${banner}
       ${emptyBoxHint}
+      ${overflow}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5">${stats}</div>
+      ${commanderXpProgress(r)}
       ${readinessCompare(r)}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5">${counters}</div>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -165,11 +244,14 @@ export function maybeShowSettlement() {
   openPanel({
     title: r.success ? '行动结算 · 撤离成功' : '行动结算 · 行动失败',
     wide: true,
-    bodyHtml: bodyHtml(r),
+    bodyHtml: renderSettlementBody(r),
     onMount: (bodyEl, close) => {
       const wrap = document.createElement('div');
       wrap.className = 'flex justify-end pt-4';
-      wrap.innerHTML = `<button type="button" class="btn bg-delta text-ink font-bold px-6 py-2 clip-corner" data-settle-close="1">返回作战准备</button>`;
+      const hasPending = Array.isArray(r.pendingItems) && r.pendingItems.length > 0;
+      wrap.innerHTML = hasPending
+        ? '<span class="text-xs text-amber-400">请先处理全部待处理撤离物资</span>'
+        : '<button type="button" class="btn bg-delta text-ink font-bold px-6 py-2 clip-corner" data-settle-close="1">返回作战准备</button>';
       bodyEl.appendChild(wrap);
 
       let done = false;
@@ -177,9 +259,27 @@ export function maybeShowSettlement() {
         if (done) return;
         done = true;
         closing = true;
-        dismissSettlement();
+        const outcome = dismissSettlement();
         closing = false;
+        if (!outcome.ok) {
+          shownFor = null;
+          setTimeout(maybeShowSettlement, 0);
+        }
       };
+
+      bodyEl.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-settle-overflow]');
+        if (!button) return;
+        const outcome = resolveSettlementOverflow(button.dataset.uid, button.dataset.settleOverflow);
+        toast(outcome.msg, outcome.ok ? 'ok' : 'err');
+        if (!outcome.ok) return;
+
+        done = true;
+        if (typeof close === 'function') close();
+        shownFor = null;
+        if (outcome.remaining > 0) setTimeout(maybeShowSettlement, 0);
+        else dismissSettlement();
+      });
 
       // 无论通过底部按钮、✕、遮罩点击还是 Esc 关闭，都必须消费掉本次结算记录
       const mask = bodyEl.closest('.modal-mask');
@@ -193,10 +293,10 @@ export function maybeShowSettlement() {
         if (mask.parentNode) observer.observe(mask.parentNode, { childList: true });
       }
 
-      wrap.querySelector('[data-settle-close]').addEventListener('click', () => {
-        if (typeof close === 'function') close();
-        dismiss();
-      });
+      wrap.querySelector('[data-settle-close]')?.addEventListener('click', () => {
+          if (typeof close === 'function') close();
+          dismiss();
+        });
     }
   });
 }

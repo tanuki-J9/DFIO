@@ -93,6 +93,16 @@ export function readinessOfLoadout(loadout, inventory) {
   }, 0);
 }
 
+/** 全队背包格数叠加；未装备背包不提供容量。 */
+export function squadBagCapacity(s = getState()) {
+  return (s?.operators?.squad || []).filter(Boolean).reduce((sum, opId) => {
+    const uid = s?.loadouts?.[opId]?.bag;
+    const inst = findInstance(uid, s);
+    const tpl = inst ? getTemplate(inst.tplId) : null;
+    return sum + (tpl?.slot === 'bag' ? nonNeg(tpl.capacity, 0) : 0);
+  }, 0);
+}
+
 /**
  * 对比当前战备与所选行动门槛
  * @returns {{ ok, required, current, gap, hasThreshold, conclusion }}
@@ -108,7 +118,6 @@ export function checkThreshold(mapId, difficulty, s = getState()) {
     };
   }
   const base = nonNeg(branch.readiness, 0);
-  // 准入价值按出战人数倍增：3 人小队需要基准值的 3 倍
   const required = scaledReadiness(base, s?.operators?.squad);
   const hasThreshold = DIFFICULTY_META[difficulty]?.hasThreshold && required > 0;
   if (!hasThreshold) {
@@ -126,6 +135,6 @@ export function checkThreshold(mapId, difficulty, s = getState()) {
     current,
     gap: ok ? 0 : required - current,
     hasThreshold: true,
-    conclusion: ok ? '达标' : '不足'
+    conclusion: ok ? '战备价值达标' : '战备价值不足'
   };
 }

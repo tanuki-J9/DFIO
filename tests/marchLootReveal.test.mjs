@@ -62,7 +62,7 @@ test('crate flow pre-rolls loot, keeps it out of carry, then settles that exact 
   assert.equal(s.run.carry.items.length, 0);
 
   march.finishCrate(s, 5_000);
-  assert.deepEqual(s.run.carry.items.map((item) => item.uid), pending);
+  assert.deepEqual(s.run.carry.lastAccepted.map((item) => item.uid), pending);
   const countAfterFinish = s.run.carry.items.length;
 
   march.finishCrate(s, 5_100);

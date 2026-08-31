@@ -12,8 +12,10 @@ import {
   candidatesForSlot, equip, unequip, unequipAll, autoEquipBest, autoEquipSquad,
   operatorGearStats, allEquippedUids, holderOf,
   shopEquipmentList, shopMaterialList, shopAmmoList,
-  buyEquipment, buyMaterial, buyAmmo, sellAmmo, sellEquipment
+  buyEquipment, buyMaterial, buyAmmo, sellAmmo, sellEquipment,
+  applyLoadoutPreset, saveLoadoutPreset
 } from '../../systems/equipment.js';
+import { baseBonuses } from '../../systems/base.js';
 import {
   ammoStock, totalAmmoRounds, normalizeAmmoLoadout, selectAmmo, setCarryRounds,
   ROUNDS_FOR_FULL_RUN, penetrationLabel
@@ -88,6 +90,7 @@ function renderLoadout(s) {
   const rows = readinessBreakdown(op.id, s);
   const mine = operatorGearStats(op.id, s);
   const total = getReadiness(s);
+  const presetSlots = baseBonuses(s).loadoutPresetSlots;
 
   return `
     <div class="mb-3">
@@ -95,6 +98,36 @@ function renderLoadout(s) {
         每名干员各自携带一套装备，同一件装备只能由一人携带。全队战备为所有上阵干员装备价值之和：
         <span class="text-delta">${fmt(total)}</span>。弹药按发单独携带，<span class="text-amber-400">不计入战备</span>，请在「弹药」页配置。
       </p>
+      ${presetSlots ? `
+        <section class="clip-tab border border-line bg-panel2 px-3 py-2.5 mb-3">
+          <div class="flex items-center justify-between gap-3 mb-2">
+            <div>
+              <p class="text-[11px] text-delta">指挥中心 · 配装预设</p>
+              <p class="text-[9px] text-sand/40 mt-0.5">保存或应用全账号干员配装；缺失装备会跳过，不会删除仓库物品。</p>
+            </div>
+            <span class="text-[10px] text-sand/45">${presetSlots} / 3 槽</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            ${Array.from({ length: presetSlots }, (_, slot) => {
+              const saved = !!s?.base?.loadoutPresets?.[slot]?.loadouts;
+              return `
+                <div data-loadout-preset="${slot}" class="clip-tab border ${saved ? 'border-delta/45' : 'border-line'} bg-panel px-2.5 py-2">
+                  <div class="flex items-center justify-between gap-2 mb-2">
+                    <span class="text-[10px] ${saved ? 'text-delta' : 'text-sand/55'}">预设 ${slot + 1}</span>
+                    <span class="text-[9px] ${saved ? 'text-delta/70' : 'text-sand/30'}">${saved ? '已保存' : '空'}</span>
+                  </div>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <button data-action="eq-preset-save" data-slot="${slot}"
+                      class="btn clip-tab text-[10px] py-1 border border-amber-400/45 text-amber-400 hover:bg-amber-400/15">保存</button>
+                    <button data-action="eq-preset-apply" data-slot="${slot}" ${saved ? '' : 'disabled'}
+                      class="btn clip-tab text-[10px] py-1 border ${saved ? 'border-delta/45 text-delta hover:bg-delta/15' : 'border-line text-sand/30'}">应用</button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </section>
+      ` : '<p class="text-[10px] text-sand/35 mb-3">指挥中心 Lv.3 解锁首个配装预设槽位。</p>'}
       <div class="eq-op-tabs">
         ${squad.map((o) => {
           const g = operatorGearStats(o.id, s);
@@ -478,7 +511,7 @@ function renderInventory(s) {
 /* ============ 商店 ============ */
 
 function renderShop(s) {
-  const eq = shopEquipmentList();
+  const eq = shopEquipmentList(s);
   const mats = shopMaterialList();
   const have = s.currency.hafCoin;
 
@@ -505,11 +538,12 @@ function renderShop(s) {
                 <span class="text-sand/45">生 <span class="text-delta">${fmt(t.hp)}</span></span>
                 <span class="text-sand/45">防 <span class="text-sky-400">${fmt(t.def)}</span></span>
               </div>
+              ${t.locked ? `<p class="text-[10px] text-rust mt-1">锁定 · ${esc(t.facilityName)} Lv.${t.requiredFacilityLevel} 解锁</p>` : ''}
             </div>
           </div>
-          <button data-action="shop-buy-eq" data-tpl="${t.id}" ${have >= t.price ? '' : 'disabled'}
+          <button data-action="shop-buy-eq" data-tpl="${t.id}" ${!t.locked && have >= t.shopPrice ? '' : 'disabled'}
             class="btn w-full clip-tab text-[10px] py-1.5 mt-2 border border-amber-400/50 text-amber-400 hover:bg-amber-400/15">
-            ${fmt(t.price)} 哈夫币
+            ${t.locked ? `${esc(t.facilityName)} Lv.${t.requiredFacilityLevel} 解锁` : `${fmt(t.shopPrice)} 哈夫币`}
           </button>
         </div>
       `).join('')}
@@ -571,6 +605,16 @@ export function handleAutoEquip() {
 export function handleAutoEquipSquad() {
   const r = autoEquipSquad();
   toast(r.ok ? `全队已自动配装，战备 ${fmt(r.before)} → ${fmt(r.after)}` : r.msg, r.ok ? 'ok' : 'err');
+}
+
+export function handleSaveLoadoutPreset(slot) {
+  const result = saveLoadoutPreset(Number(slot));
+  toast(result.msg, result.ok ? 'ok' : 'err');
+}
+
+export function handleApplyLoadoutPreset(slot) {
+  const result = applyLoadoutPreset(Number(slot));
+  toast(result.msg, result.ok ? 'ok' : 'err');
 }
 
 export async function handleClearLoadout() {

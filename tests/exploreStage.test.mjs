@@ -104,3 +104,14 @@ test('loot slots search together and reveal only after their rarity threshold', 
   assert.match(html, /loot-magnifier/);
   assert.doesNotMatch(html, /红色机密/);
 });
+
+test('stage medical text renders automatic heal feedback and remaining snapshotted uses', () => {
+  assert.equal(typeof stage.medicalUsesText, 'function');
+  assert.equal(typeof stage.medicalFxText, 'function');
+  if (typeof stage.medicalUsesText !== 'function' || typeof stage.medicalFxText !== 'function') return;
+
+  assert.equal(stage.medicalUsesText({ medical: { maxUses: 4, remainingUses: 2 } }), '急救包 2/4');
+  assert.equal(stage.medicalUsesText({ medical: { maxUses: 0, remainingUses: 0 } }), '');
+  assert.equal(stage.medicalFxText({ amount: 27, maxUses: 4, remainingUses: 2 }),
+    '急救 +27 · 剩余 2/4');
+});

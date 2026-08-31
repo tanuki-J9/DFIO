@@ -7,7 +7,7 @@
 import { MAPS, DIFFICULTY_META, getMapCover, SLOTS, getTemplate, getBranch } from '../../config/index.js';
 import { getState, notify, VIEW } from '../../core/state.js';
 import { fmt, fmtTime, esc } from '../../core/utils.js';
-import { getReadiness, checkThreshold } from '../../systems/readiness.js';
+import { getReadiness, checkThreshold, squadBagCapacity } from '../../systems/readiness.js';
 import { computeTimeLimit, extractDuration } from '../../systems/extraction.js';
 import { warehouseSummary, galleryProgress } from '../../systems/collection.js';
 import { squadCombatStats, operatorListView } from '../../systems/operator.js';
@@ -22,15 +22,17 @@ import {
   renderEquipmentPanel, setEquipSubTab, openSlotPicker, handleEquipByUid, handleUnequip,
   handleAutoEquip, handleAutoEquipSquad, handleClearLoadout, handleClearAllLoadouts,
   handleSelectEquipOperator, handleBuyEquipment, handleBuyMaterial, handleSell,
-  handleBuyAmmo, handleSelectAmmo, handleSetCarryRounds, handleCarryMax, handleSellAmmo
+  handleBuyAmmo, handleSelectAmmo, handleSetCarryRounds, handleCarryMax, handleSellAmmo,
+  handleApplyLoadoutPreset, handleSaveLoadoutPreset
 } from './equipmentPanel.js';
-import { renderSkillPanel, handleUpgradeSkill } from './skillPanel.js';
 import {
   renderWarehousePanel, handleWarehouseCat, handleWarehouseSellEquipment,
   handleSellCollectible, handleSellMaterial, handleCollectibleDetail,
-  handleWarehouseSellAmmo
+  handleWarehouseSellAmmo, handleWarehouseBatchSell, handleWarehouseAutoSort,
+  handleDiscardLegacyAmmo, handleDiscardLegacyEquipment
 } from './warehousePanel.js';
 import { renderGalleryPanel, handleGallerySeries, handleGalleryEntry } from './galleryPanel.js';
+import { openFacilityDetail, renderBasePanel } from './basePanel.js';
 
 const TABS = [
   { id: 'map', name: '地图与行动', icon: '🗺️' },
@@ -38,7 +40,7 @@ const TABS = [
   { id: 'equipment', name: '装备配置', icon: '🔫' },
   { id: 'warehouse', name: '仓库', icon: '📦' },
   { id: 'gallery', name: '收藏室', icon: '🏛️' },
-  { id: 'skill', name: '技能升级', icon: '🧠' }
+  { id: 'base', name: '基地', icon: '🏗️' }
 ];
 
 /** 难度配色 → 项目内真实可用的类名（避免 amber / violet 等无效类） */
@@ -85,7 +87,7 @@ export function launchCheck(s = getState()) {
   if (mapId && difficulty) {
     const chk = checkThreshold(mapId, difficulty, s);
     if (!chk.ok) {
-      missing.push(`战备不足：需要 ${fmt(chk.required)}，当前 ${fmt(chk.current)}，还差 ${fmt(chk.gap)}`);
+      missing.push(`战备价值不足：需要 ${fmt(chk.required)}，当前 ${fmt(chk.current)}，还差 ${fmt(chk.gap)}`);
     }
   }
 
@@ -119,7 +121,7 @@ export function renderPrepare() {
       ${tab === 'equipment' ? renderEquipmentPanel() : ''}
       ${tab === 'warehouse' ? renderWarehousePanel() : ''}
       ${tab === 'gallery' ? renderGalleryPanel() : ''}
-      ${tab === 'skill' ? renderSkillPanel() : ''}
+      ${tab === 'base' ? renderBasePanel() : ''}
     </div>
   `;
 }
@@ -149,6 +151,7 @@ function renderBriefing(s) {
   const meta = difficulty ? DIFFICULTY_META[difficulty] : null;
   const check = launchCheck(s);
   const readiness = getReadiness(s);
+  const bagCapacity = squadBagCapacity(s);
   const wh = warehouseSummary(s);
   const gl = galleryProgress(s);
   const stats = squadCombatStats(s);
@@ -179,7 +182,7 @@ function renderBriefing(s) {
         ${renderBriefGear(s, stats)}
       </div>
 
-      <div class="px-3 pb-3 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
+      <div class="px-3 pb-3 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2">
         ${statCard({ label: '战备 / 装备价值', value: fmt(readiness), tone: 'delta' })}
         ${statCard({ label: '上阵干员', value: `${s.operators.squad.length} / 3`, tone: s.operators.squad.length ? 'sand' : 'rust' })}
         ${statCard({
@@ -190,6 +193,7 @@ function renderBriefing(s) {
         })}
         ${statCard({ label: '行动时限', value: timeLimit ? fmtTime(timeLimit) : '—', tone: 'amber' })}
         ${statCard({ label: '撤离读条', value: `${extractSec.toFixed(1)}s`, tone: 'sky' })}
+        ${statCard({ label: '背包容量', value: `${bagCapacity} 格`, sub: '全队背包容量叠加', tone: bagCapacity ? 'sky' : 'rust' })}
         ${statCard({ label: '仓库库存', value: `${wh.equipment.count + wh.collectible.count + wh.material.count} 件`, sub: `图鉴 ${gl.owned}/${gl.total} · 价值 ${fmt(wh.totalValue)}`, tone: 'amber' })}
         ${statCard({ label: '小队战力', value: `${fmt(stats.atk)} / ${fmt(stats.hp)}`, sub: '攻击 / 生命', tone: 'sand' })}
       </div>
@@ -407,6 +411,8 @@ function bind(root) {
     'eq-equip-uid': ({ uid }) => handleEquipByUid(uid),
     'eq-auto': () => handleAutoEquip(),
     'eq-auto-squad': () => handleAutoEquipSquad(),
+    'eq-preset-save': ({ slot }) => handleSaveLoadoutPreset(slot),
+    'eq-preset-apply': ({ slot }) => handleApplyLoadoutPreset(slot),
     'eq-clear': () => handleClearLoadout(),
     'eq-clear-all': () => handleClearAllLoadouts(),
     'eq-sell': ({ uid }) => handleSell(uid),
@@ -419,17 +425,20 @@ function bind(root) {
     'ammo-carry-max': () => handleCarryMax(),
     'ammo-sell': ({ tpl }) => handleSellAmmo(tpl),
 
-    'skill-up': ({ id }) => handleUpgradeSkill(id),
-
     'wh-cat': ({ cat }) => handleWarehouseCat(cat),
     'wh-sell-eq': ({ uid }) => handleWarehouseSellEquipment(uid),
     'wh-sell-ammo': ({ tpl }) => handleWarehouseSellAmmo(tpl),
+    'wh-discard-legacy-eq': ({ uid }) => handleDiscardLegacyEquipment(uid),
+    'wh-discard-legacy-ammo': ({ tpl }) => handleDiscardLegacyAmmo(tpl),
     'wh-sell-col': ({ id }) => handleSellCollectible(id),
     'wh-sell-mat': ({ id }) => handleSellMaterial(id),
     'wh-col-detail': ({ id }) => handleCollectibleDetail(id),
+    'wh-batch-sell': ({ cat }) => handleWarehouseBatchSell(cat),
+    'wh-auto-sort': () => handleWarehouseAutoSort(),
 
     'gl-series': ({ id }) => handleGallerySeries(id || null),
-    'gl-entry': ({ id }) => handleGalleryEntry(id)
+    'gl-entry': ({ id }) => handleGalleryEntry(id),
+    'base-facility': ({ id }) => openFacilityDetail(id)
   });
 }
 

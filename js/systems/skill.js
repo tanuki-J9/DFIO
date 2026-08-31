@@ -3,7 +3,13 @@
  * 技能增益为账号级永久效果，不因撤离失败丢失，且绝不改变战备（需求 9.1 / 9.6）
  */
 
-import { SKILL_NODES, SKILL_BRANCH_META, getSkillNode, skillUpgradeCost } from '../config/index.js';
+import {
+  ACCOUNT_ATTACK_BONUS_CAP,
+  SKILL_NODES,
+  SKILL_BRANCH_META,
+  getSkillNode,
+  skillUpgradeCost
+} from '../config/index.js';
 import { getState, notify, spend } from '../core/state.js';
 import { nonNegInt, nonNeg } from '../core/utils.js';
 
@@ -11,35 +17,51 @@ export function getSkillLevel(nodeId, s = getState()) {
   return nonNegInt(s.skills?.[nodeId], 0);
 }
 
+function skillNodeView(node, s) {
+  const level = getSkillLevel(node.id, s);
+  const maxed = level >= node.maxLevel;
+  const cost = maxed ? 0 : skillUpgradeCost(node, level);
+  const have = nonNeg(s.currency.hafCoin, 0);
+  const rawEffect = nonNeg(node.effect.per, 0) * level;
+  const cap = node.effect.type === 'atkPct' ? ACCOUNT_ATTACK_BONUS_CAP : null;
+  return {
+    id: node.id,
+    name: node.name,
+    desc: node.desc,
+    unit: node.unit,
+    level,
+    maxLevel: node.maxLevel,
+    maxed,
+    cost,
+    affordable: !maxed && have >= cost,
+    shortfall: maxed ? 0 : Math.max(0, Math.ceil(cost - have)),
+    current: effectText(node, level),
+    next: maxed ? null : effectText(node, level + 1),
+    capReached: cap !== null && rawEffect >= cap,
+    capText: cap === null ? '' : `账号攻击加成上限 ${Math.round(cap * 100)}%`
+  };
+}
+
+/** 归入指定基地设施的永久技能节点视图。 */
+export function skillNodesForFacility(facilityId, s = getState()) {
+  return SKILL_NODES
+    .filter((node) => node.facility === facilityId)
+    .map((node) => skillNodeView(node, s));
+}
+
 /** 分支分组后的节点视图 */
 export function skillTreeView(s = getState()) {
   return Object.values(SKILL_BRANCH_META).map((branch) => ({
     ...branch,
-    nodes: SKILL_NODES.filter((n) => n.branch === branch.id).map((n) => {
-      const level = getSkillLevel(n.id, s);
-      const maxed = level >= n.maxLevel;
-      const cost = maxed ? 0 : skillUpgradeCost(n, level);
-      const have = nonNeg(s.currency.hafCoin, 0);
-      return {
-        id: n.id,
-        name: n.name,
-        desc: n.desc,
-        unit: n.unit,
-        level,
-        maxLevel: n.maxLevel,
-        maxed,
-        cost,
-        affordable: !maxed && have >= cost,
-        shortfall: maxed ? 0 : Math.max(0, Math.ceil(cost - have)),
-        current: effectText(n, level),
-        next: maxed ? null : effectText(n, level + 1)
-      };
-    })
+    nodes: SKILL_NODES.filter((n) => n.branch === branch.id).map((n) => skillNodeView(n, s))
   }));
 }
 
 function effectText(node, level) {
-  const total = nonNeg(node.effect.per, 0) * nonNegInt(level, 0);
+  const rawTotal = nonNeg(node.effect.per, 0) * nonNegInt(level, 0);
+  const total = node.effect.type === 'atkPct'
+    ? Math.min(ACCOUNT_ATTACK_BONUS_CAP, rawTotal)
+    : rawTotal;
   if (node.unit === '格') return `+${Math.round(total)} 格`;
   return `+${(total * 100).toFixed(1)}%`;
 }
@@ -74,7 +96,7 @@ export function skillBonuses(s = getState()) {
     defPct: 0,
     fireRate: 0,
     bossDmgPct: 0,
-    regenPct: 0,
+    medicalHealPct: 0,
     scavengeSpeed: 0,
     lootBonus: 0,
     crateTier: 0,

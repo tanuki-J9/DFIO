@@ -5,14 +5,13 @@
  */
 
 import {
-  MAPS, MAP_BACKGROUND, DIFFICULTY_META, getMapMinReadiness, scaledReadiness, getBranch, getMap, SLOTS
+  MAPS, MAP_BACKGROUND, DIFFICULTY_META, getBranch, getMap, SLOTS
 } from '../../config/index.js';
 import { getState, notify } from '../../core/state.js';
 import { fmt, fmtTime, esc } from '../../core/utils.js';
 import { getReadiness, checkThreshold } from '../../systems/readiness.js';
 import { computeTimeLimit } from '../../systems/extraction.js';
 import { warehouseSummary, galleryProgress } from '../../systems/collection.js';
-import { totalSkillLevels } from '../../systems/skill.js';
 import { toast, openPanel, delegate } from '../components.js';
 
 const DANGER_COLORS = {
@@ -26,7 +25,7 @@ const DANGER_COLORS = {
 let openMapModal = null;
 
 /**
- * 特勤处：底图中央的后勤设施，点击展开干员编成 / 装备配置 / 仓库 / 收藏室 / 技能升级
+ * 特勤处：底图中央的后勤设施，点击展开战前准备与基地建设
  * 坐标对准底图上已绘制的特勤处建筑
  */
 const OPS_SPOT = { x: 47.2, y: 46.5 };
@@ -37,7 +36,7 @@ const OPS_ENTRIES = [
   { id: 'equipment', name: '装备配置', icon: '🔫', desc: '为每名干员配装，并采购所需装备' },
   { id: 'warehouse', name: '仓库', icon: '📦', desc: '装备、收藏品与材料的分类库存管理' },
   { id: 'gallery', name: '收藏室', icon: '🏛️', desc: '图鉴：记录历史上获得过的每一件大红' },
-  { id: 'skill', name: '技能升级', icon: '🧠', desc: '强化小队永久战斗能力' }
+  { id: 'base', name: '基地', icon: '🏗️', desc: '升级七座设施与其永久技能，解锁行动增益' }
 ];
 
 /* ============ 沙盘地图 ============ */
@@ -54,7 +53,7 @@ export function renderMapPanel() {
       </div>
       <p class="text-[11px] text-sand/50 leading-relaxed max-w-2xl">
         点击战术沙盘上的据点查看该战区的全部行动难度。普通行动无门槛；
-        机密、绝密与永恒行动均设有最低战备要求，难度越高战利品档位越高、
+        机密、绝密与永恒行动按装备总价值设置门槛，并随上阵人数等比例提高；
         行动时限越紧张、撤离失败损失越大。
       </p>
     </div>
@@ -80,7 +79,7 @@ export function renderMapPanel() {
           <span class="danger-dot bg-delta"></span>可进入
         </span>
         <span class="flex items-center gap-1.5 text-[10px] text-sand/45">
-          <span class="danger-dot bg-rust"></span>战备不足
+          <span class="danger-dot bg-rust"></span>战备价值不足
         </span>
         <span class="flex items-center gap-1.5 text-[10px] text-sand/45">
           <span class="danger-dot bg-sky-400"></span>特勤处（后勤）
@@ -123,7 +122,7 @@ export function openOpsCenter() {
     equipment: `${equippedCount} / ${squadCount * SLOTS.length || SLOTS.length} 已装备`,
     warehouse: `${wh.equipment.count + wh.collectible.count + wh.material.count} 件 · 价值 ${fmt(wh.totalValue)}`,
     gallery: `图鉴 ${gl.owned} / ${gl.total}`,
-    skill: `已投入 ${fmt(totalSkillLevels(s))} 级`
+    base: `指挥中心 Lv.${s.base?.facilities?.commandCenter || 1}`
   };
 
   const handle = openPanel({
@@ -165,12 +164,10 @@ export function openOpsCenter() {
 
 /** 底图上的单个据点热点 */
 function renderSpot(map, s, readiness) {
-  // 门槛同样按出战人数倍增，与弹窗内判定保持一致
-  const minReq = scaledReadiness(getMapMinReadiness(map), s?.operators?.squad);
-  const locked = readiness < minReq;
+  const passCount = map.branches.filter((b) => checkThreshold(map.id, b.difficulty, s).ok).length;
+  const locked = passCount === 0;
   const selected = s.selection.mapId === map.id;
   const selMeta = selected && s.selection.difficulty ? DIFFICULTY_META[s.selection.difficulty] : null;
-  const passCount = map.branches.filter((b) => checkThreshold(map.id, b.difficulty, s).ok).length;
 
   const tone = locked ? 'is-locked' : selected ? 'is-selected' : 'is-open';
 
@@ -184,7 +181,7 @@ function renderSpot(map, s, readiness) {
         <span class="map-spot-name">${esc(map.name)}</span>
         <span class="map-spot-meta">
           ${locked
-            ? '战备不足'
+            ? '战备价值不足'
             : selMeta
               ? esc(selMeta.short)
               : `${passCount}/${map.branches.length} 档可入`}
@@ -315,9 +312,9 @@ function renderDifficultyBody(map, activeDiff) {
 
       <dl class="op-rows">
         ${row('行动难度', `<span class="${dc.text}">${esc(meta.name)}</span>`)}
-        ${row('准入价值', branch.readiness > 0
-          ? `<span class="${chk.ok ? 'text-sand' : 'text-rust'}">${fmt(chk.required)}</span>
-             <span class="op-row-note">${fmt(branch.readiness)} × ${chk.squadSize}人${chk.ok ? '' : ` · 还差 ${fmt(chk.gap)}`}</span>`
+        ${row('准入价值', chk.hasThreshold
+          ? `<span class="${chk.ok ? 'text-sand' : 'text-rust'}">${fmt(chk.current)} / ${fmt(chk.required)}</span>
+             <span class="op-row-note">${fmt(chk.base)} × ${chk.squadSize}人${chk.ok ? ' · 已达标' : ` · 还差 ${fmt(chk.gap)}`}</span>`
           : '<span class="text-sand">无限制</span>')}
         ${row('等级限制', branch.level > 0
           ? `<span class="text-sand">Lv.${branch.level}</span>`
@@ -331,7 +328,7 @@ function renderDifficultyBody(map, activeDiff) {
 
       <button data-action="start-op" data-diff="${branch.difficulty}"
         class="op-start ${chk.ok ? 'is-ready' : 'is-locked'}">
-        ${chk.ok ? (selected ? '重新选定此行动' : '开始行动') : `战备不足 · 还差 ${fmt(chk.gap)}`}
+        ${chk.ok ? (selected ? '重新选定此行动' : '开始行动') : `战备价值不足 · 还差 ${fmt(chk.gap)}`}
       </button>
     </div>
   `;
@@ -361,7 +358,7 @@ export function selectBranch(mapId, difficulty) {
 
   const chk = checkThreshold(mapId, difficulty, s);
   if (!chk.ok) {
-    toast(`战备不足：需要 ${fmt(chk.required)}，当前 ${fmt(chk.current)}，还差 ${fmt(chk.gap)}`, 'err');
+    toast(`战备价值不足：需要 ${fmt(chk.required)}，当前 ${fmt(chk.current)}，还差 ${fmt(chk.gap)}`, 'err');
     // 仍记录选择，便于玩家看到差距并去配装
     s.selection.mapId = mapId;
     s.selection.difficulty = difficulty;

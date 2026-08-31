@@ -15,6 +15,7 @@ import {
 } from '../config/index.js';
 import { getState } from '../core/state.js';
 import { randInt, weightedPick, uid, nonNeg, pick } from '../core/utils.js';
+import { addRunXp } from './commander.js';
 
 export const LOOT_KIND = {
   HAF: 'hafCoin',
@@ -113,14 +114,15 @@ function makeMaterialLoot(maxRarity, valueBonus) {
  * 收藏品掉落：只能从当前地图的专属池中产出
  * 例如「反应堆冷却核心」只在 AZ3 的红色池中，别的地图永远不会掉
  */
-function makeCollectibleLoot(maxRarity, valueBonus, mapId = currentMapId()) {
-  if (!mapId) return null;
+export function rollCollectibleRarity(maxRarity, redWeightBonus = 0) {
   const capTier = RARITY_META[maxRarity]?.tier || 1;
 
-  // 红色需要箱体/击杀档位达到红色，否则只能出金色
   const candidates = [];
   if (capTier >= RARITY_META[RARITY.RED].tier) {
-    candidates.push({ rarity: RARITY.RED, weight: 12 });
+    candidates.push({
+      rarity: RARITY.RED,
+      weight: 12 * (1 + Math.min(0.5, nonNeg(redWeightBonus, 0)))
+    });
   }
   if (capTier >= RARITY_META[RARITY.LEGEND].tier) {
     candidates.push({ rarity: RARITY.LEGEND, weight: 88 });
@@ -129,7 +131,14 @@ function makeCollectibleLoot(maxRarity, valueBonus, mapId = currentMapId()) {
 
   const weights = {};
   candidates.forEach((c) => { weights[c.rarity] = c.weight; });
-  const rarity = weightedPick(weights) || RARITY.LEGEND;
+  return weightedPick(weights) || RARITY.LEGEND;
+}
+
+function makeCollectibleLoot(maxRarity, valueBonus, mapId = currentMapId(), redWeightBonus = 0) {
+  if (!mapId) return null;
+  // 红色需要箱体/击杀档位达到红色，否则只能出金色。
+  const rarity = rollCollectibleRarity(maxRarity, redWeightBonus);
+  if (!rarity) return null;
 
   const ids = mapCollectiblePool(mapId, rarity);
   if (!ids.length) return null;
@@ -157,7 +166,7 @@ function makeHafLoot(range, valueBonus) {
  * 生成补给箱战利品
  * @returns {Array} loot 列表
  */
-export function rollCrateLoot(crateConf, lootBonus = 0) {
+export function rollCrateLoot(crateConf, lootBonus = 0, redWeightBonus = 0) {
   const conf = crateConf || CRATE_TIERS[1];
   const out = [];
   const rolls = Math.max(1, conf.rolls);
@@ -173,7 +182,7 @@ export function rollCrateLoot(crateConf, lootBonus = 0) {
   // 高档补给箱有机会额外产出该地图专属收藏品，档位越高概率越大
   const colChance = Math.max(0, (Math.max(1, conf.rolls) - 1)) * 0.06 + 0.04;
   if (Math.random() < colChance) {
-    const col = makeCollectibleLoot(conf.rarity, lootBonus);
+    const col = makeCollectibleLoot(conf.rarity, lootBonus, currentMapId(), redWeightBonus);
     if (col) out.push(col);
   }
   return out;
@@ -184,7 +193,7 @@ export function rollCrateLoot(crateConf, lootBonus = 0) {
  * @param {object} opts { isBoss, isElite, isOperator, carried }
  *   carried 为敌方干员随机携带的装备，击杀后全部归我方
  */
-export function rollKillLoot(lootTier, opts = {}, lootBonus = 0) {
+export function rollKillLoot(lootTier, opts = {}, lootBonus = 0, redWeightBonus = 0) {
   const { isBoss = false, isElite = false, isOperator = false, carried = [] } = opts;
   const out = [];
 
@@ -218,7 +227,7 @@ export function rollKillLoot(lootTier, opts = {}, lootBonus = 0) {
     const am = makeAmmoLoot(lootTier, lootBonus);
     if (am) out.push(am);
     if (Math.random() < 0.55) {
-      const col = makeCollectibleLoot(lootTier, lootBonus);
+      const col = makeCollectibleLoot(lootTier, lootBonus, currentMapId(), redWeightBonus);
       if (col) out.push(col);
     }
     return out;
@@ -232,7 +241,7 @@ export function rollKillLoot(lootTier, opts = {}, lootBonus = 0) {
       if (am) out.push(am);
     }
     if (Math.random() < (isOperator ? 0.2 : 0.1)) {
-      const col = makeCollectibleLoot(lootTier, lootBonus);
+      const col = makeCollectibleLoot(lootTier, lootBonus, currentMapId(), redWeightBonus);
       if (col) out.push(col);
     }
     return out;
@@ -256,20 +265,43 @@ export function rollKillLoot(lootTier, opts = {}, lootBonus = 0) {
 export function addToCarry(lootList, s = getState()) {
   const run = s.run;
   if (!run || !Array.isArray(lootList)) return 0;
+  // 新行动在出发时锁定容量；旧存档无该字段时维持旧版不限容量，避免更新后丢失战利品。
+  const capacity = Number.isFinite(run.bagCapacity)
+    ? nonNeg(run.bagCapacity, 0)
+    : Number.POSITIVE_INFINITY;
+  run.carry.capacity = Number.isFinite(capacity) ? capacity : null;
+  run.carry.overflow = 0;
+  run.carry.lastAccepted = [];
+  run.carry.lastRejected = [];
   let gained = 0;
   lootList.forEach((item) => {
     if (!item) return;
+    const firstAcceptance = !item.uid || !run.carry.items.some((x) => x.uid === item.uid);
+    const stackable = item.kind === LOOT_KIND.HAF
+      || item.kind === LOOT_KIND.MATERIAL
+      || item.kind === LOOT_KIND.AMMO;
+    const same = stackable && run.carry.items.find(
+      (x) => x.kind === item.kind && x.tplId === item.tplId
+    );
+    if (!same && run.carry.items.length >= capacity) {
+      run.carry.overflow += 1;
+      run.carry.lastRejected.push(item);
+      return;
+    }
+    run.carry.lastAccepted.push(item);
     gained += nonNeg(item.value, 0);
+    if (firstAcceptance) {
+      if (item.rarity === RARITY.RED) addRunXp('loot', 100, s);
+      else if (item.rarity === RARITY.LEGEND) addRunXp('loot', 20, s);
+    }
     if (item.kind === LOOT_KIND.HAF) {
       run.carry.hafCoin = nonNeg(run.carry.hafCoin, 0) + nonNeg(item.count, 0);
-      // 哈夫币同样以条目形式记录，便于结算与保险箱存放
-      run.carry.items.push(item);
+      if (same) {
+        same.count += nonNeg(item.count, 0);
+        same.value += nonNeg(item.value, 0);
+      } else run.carry.items.push(item);
     } else {
       // 材料与弹药按同类堆叠（弹药的 count 即发数）
-      const stackable = item.kind === LOOT_KIND.MATERIAL || item.kind === LOOT_KIND.AMMO;
-      const same = stackable && run.carry.items.find(
-        (x) => x.kind === item.kind && x.tplId === item.tplId
-      );
       if (same) {
         same.count += nonNeg(item.count, 1);
         same.value += nonNeg(item.value, 0);

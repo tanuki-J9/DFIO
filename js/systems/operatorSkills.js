@@ -5,7 +5,7 @@
  * 技能 CD 与读条全部使用绝对时间戳，切后台或刷新后不会重新计时。
  */
 
-import { OPERATOR_SKILL_EFFECTS, ROLE, ROLE_PASSIVE_EFFECTS, getBranch } from '../config/index.js';
+import { OPERATOR_SKILL_EFFECTS, ROLE, ROLE_PASSIVE_EFFECTS, getBranch, getTemplate } from '../config/index.js';
 import { getOperator } from '../config/operators.js';
 import { pushLog } from '../core/state.js';
 import { nonNeg, clamp } from '../core/utils.js';
@@ -14,6 +14,7 @@ import { peekNodeQueue } from './nodePlan.js';
 const BASE_RESCUE_SECONDS = 8;
 const BASE_RESCUE_HP_PCT = 0.25;
 const ULT_REVIVE_HP_PCT = 0.40;
+const MEDICAL_TRIGGER_RATIO = nonNeg(getTemplate('t_med')?.healing?.triggerRatio, 0.5);
 
 function runtime(run) {
   if (!run.skillRuntime || typeof run.skillRuntime !== 'object') {
@@ -132,6 +133,32 @@ function lowestAlive(run, count = 1, { excludeId = null } = {}) {
 }
 
 /**
+ * Automatically use one snapshotted medical tactical charge for this combat tick.
+ * Downed members are excluded so tactical medicine never acts as a revive.
+ */
+export function tryAutoMedical(run, now = Date.now()) {
+  const medical = run?.medical;
+  if (!medical || nonNeg(medical.remainingUses, 0) <= 0 || nonNeg(medical.healRatio, 0) <= 0) {
+    return { used: false };
+  }
+
+  const tickAt = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  const status = runtime(run).status;
+  if (status.medicalUsedAt === tickAt) return { used: false };
+
+  const target = lowestAlive(run, 1)
+    .find((member) => hpRatio(member) < MEDICAL_TRIGGER_RATIO);
+  if (!target) return { used: false };
+
+  const amount = healMember(run, target, target.maxHp * nonNeg(medical.healRatio, 0));
+  if (amount <= 0) return { used: false };
+
+  medical.remainingUses = Math.max(0, Math.floor(nonNeg(medical.remainingUses, 0)) - 1);
+  status.medicalUsedAt = tickAt;
+  return { used: true, targetId: target.id, amount };
+}
+
+/**
  * 敌方攻击前选定一个真实干员目标。烟雾只保护被覆盖的那个人。
  */
 export function selectEnemyTarget(run) {
@@ -190,7 +217,8 @@ function reviveMember(run, member, hpPct, label) {
 
 function supportReviveSpeed(run) {
   const supportCount = activeMembers(run).filter((m) => m.role === ROLE.SUPPORT).length;
-  return supportCount * nonNeg(ROLE_PASSIVE_EFFECTS[ROLE.SUPPORT]?.reviveSpeed, 0);
+  return supportCount * nonNeg(ROLE_PASSIVE_EFFECTS[ROLE.SUPPORT]?.reviveSpeed, 0)
+    + nonNeg(run?.baseBonuses?.medicalReviveSpeed, 0);
 }
 
 /**
@@ -255,7 +283,7 @@ function tickRevive(run, now, events) {
     duration, hpPct: BASE_RESCUE_HP_PCT,
     label: '战地救助完成'
   };
-  pushLog('skill', `${source.name} 开始救助 ${target.name}（${duration.toFixed(1)} 秒${speed > 0 ? '，支援位加速' : ''}）。`);
+  pushLog('skill', `${source.name} 开始救助 ${target.name}（${duration.toFixed(1)} 秒${speed > 0 ? '，救助加速' : ''}）。`);
   events.push({ type: 'revive-start', targetId: target.id, opId: source.id, seconds: duration, ultimate: false });
 }
 
@@ -271,8 +299,30 @@ export function tickMarchOperatorSkills(s, now) {
     if (ready(run, sk, now)) {
       const remainingMs = Math.max(0, (run.phaseStartedAt + run.phaseDuration * 1000) - now);
       if (remainingMs > 450) {
-        const cutMs = Math.min(remainingMs - 250, sk.skipSeconds * 1000);
+        const marchTiming = runtime(run).status.marchTiming;
+        // Legacy active marches have no timing snapshot; they keep their
+        // current duration for this one phase so an old save cannot bypass
+        // the new global cap/floor. The skill still triggers normally.
+        const minimumDuration = clamp(
+          nonNeg(marchTiming?.minimumDuration, run.phaseDuration),
+          0,
+          nonNeg(run.phaseDuration, 0)
+        );
+        const totalCutBudgetMs = Math.max(
+          0,
+          Math.round((nonNeg(run.phaseDuration, 0) - minimumDuration) * 1000)
+        );
+        const appliedCutMs = Math.min(
+          totalCutBudgetMs,
+          nonNeg(marchTiming?.activeCutMs, 0)
+        );
+        const cutMs = Math.min(
+          remainingMs - 250,
+          sk.skipSeconds * 1000,
+          totalCutBudgetMs - appliedCutMs
+        );
         run.phaseStartedAt -= Math.max(0, cutMs);
+        if (marchTiming) marchTiming.activeCutMs = appliedCutMs + Math.max(0, cutMs);
         run.distance = nonNeg(run.distance, 0) + nonNeg(sk.distance, 0);
         commit(run, sk, now);
         pushLog('skill', `威龙释放【${sk.name}】，小队突进 ${Math.round(sk.distance)}m。`);

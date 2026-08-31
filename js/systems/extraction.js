@@ -11,7 +11,7 @@ import {
 import { remainingSeconds } from '../core/storage.js';
 import { nonNeg, clamp, gate } from '../core/utils.js';
 import { squadCombatStats } from './operator.js';
-import { pushFx } from './march.js';
+import { pushFx, resumeMarch } from './march.js';
 
 let settleHandler = null;
 /** 注册结算回调（由 settlement 模块提供） */
@@ -109,8 +109,7 @@ export function cancelExtraction() {
 
   const now = Date.now();
   run.extract = null;
-  const gap = Math.max(0.6, nonNeg(run.nodeGap, 3));
-  setPhase(PHASE.MARCH, { duration: gap, at: now });
+  resumeMarch(s, now);
   pushLog('extract', '已取消撤离，小队继续推进');
   return { ok: true, msg: '撤离已取消' };
 }
@@ -119,8 +118,7 @@ export function cancelExtraction() {
 function interruptExtraction(s, now) {
   const run = s.run;
   run.extract = null;
-  const gap = Math.max(0.6, nonNeg(run.nodeGap, 3));
-  setPhase(PHASE.MARCH, { duration: gap, at: now });
+  resumeMarch(s, now);
   pushLog('fail', '撤离读条被敌人打断，需重新呼叫撤离！');
   pushFx('extract-break', {});
 }

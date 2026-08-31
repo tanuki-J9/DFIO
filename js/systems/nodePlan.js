@@ -21,6 +21,21 @@ export function peekNodeQueue(run, branch, count = 1) {
   return run.nodeQueue.slice(0, Math.max(0, Math.floor(count)));
 }
 
+/** Facility-facing preview that preserves the real queue and hides bosses until marked. */
+export function previewIntelNodes(run, branch) {
+  const intelligenceCount = Math.min(2,
+    Math.max(0, Math.floor(run?.baseBonuses?.previewNodes || 0)));
+  const launchCount = run?.nodeIndex === 0
+    ? Math.max(0, Math.floor(run?.mobility?.startPreviewNodes || 0))
+    : 0;
+  const count = intelligenceCount + launchCount;
+  if (!count) return [];
+  const markBoss = !!run?.baseBonuses?.markBoss;
+  return peekNodeQueue(run, branch, count).map((type) => (
+    type === 'boss' && !markBoss ? 'enemy' : type
+  ));
+}
+
 export function takeNextNode(run, branch) {
   ensureNodeQueue(run, branch, 1);
   return run.nodeQueue.shift() || 'crate';

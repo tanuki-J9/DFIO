@@ -4,11 +4,15 @@
  * 装备保留出售与「装备给当前配装干员」的入口，收藏品与材料可出售
  */
 
-import { RARITY, RARITY_META, SLOTS, getTemplate } from '../../config/index.js';
+import { RARITY, RARITY_META, SLOTS, getTemplate, getAmmo } from '../../config/index.js';
 import { getState, notify } from '../../core/state.js';
 import { fmt, esc } from '../../core/utils.js';
 import { operatorListView } from '../../systems/operator.js';
-import { sellEquipment, shopAmmoList, sellAmmo } from '../../systems/equipment.js';
+import {
+  autoSortWarehouse, batchSellWarehouseCategory, sellEquipment, shopAmmoList, sellAmmo,
+  discardLegacyAmmo, discardLegacyEquipment,
+  warehouseCapacity, warehouseFree, warehouseUsed
+} from '../../systems/equipment.js';
 import { totalAmmoRounds, normalizeAmmoLoadout } from '../../systems/ammo.js';
 import {
   warehouseEquipment, warehouseCollectibles, warehouseMaterials, warehouseSummary,
@@ -17,6 +21,9 @@ import {
 import { getEquipOperator } from './equipmentPanel.js';
 import { toast, emptyState, statCard, delegate, confirmDialog, openPanel } from '../components.js';
 import { itemArt, slotArt } from '../itemArt.js';
+import {
+  baseBonuses, consumableCollectibleCount, protectedCollectibleCount
+} from '../../systems/base.js';
 
 const CATS = [
   { id: 'equipment', name: '装备', icon: '🔫' },
@@ -31,9 +38,12 @@ export function setWarehouseCat(id) {
   cat = CATS.some((c) => c.id === id) ? id : 'equipment';
 }
 
-export function renderWarehousePanel() {
-  const s = getState();
+export function renderWarehousePanel(s = getState()) {
   const sum = warehouseSummary(s);
+  const used = warehouseUsed(s);
+  const capacity = warehouseCapacity(s);
+  const free = warehouseFree(s);
+  const bonuses = baseBonuses(s);
 
   return `
     <section class="clip-corner bg-panel border border-line overflow-hidden mb-4">
@@ -42,7 +52,9 @@ export function renderWarehousePanel() {
           <span class="text-base">📦</span>
           <h3 class="text-xs text-delta tracking-[0.2em]">仓库 · WAREHOUSE</h3>
         </div>
-        <span class="text-[10px] text-sand/40 shrink-0">库存总价值 ${fmt(sum.totalValue)}</span>
+        <span class="text-[10px] ${free > 0 ? 'text-sand/40' : 'text-rust'} shrink-0">
+          ${fmt(used)} / ${fmt(capacity)} 格 · 空余 ${fmt(free)}
+        </span>
       </header>
       <div class="p-3 grid grid-cols-2 md:grid-cols-5 gap-2">
         ${statCard({ label: '装备', value: `${sum.equipment.count} 件`, sub: `价值 ${fmt(sum.equipment.value)} · 携带中 ${sum.equipment.equipped}`, tone: 'delta' })}
@@ -50,6 +62,17 @@ export function renderWarehousePanel() {
         ${statCard({ label: '收藏品', value: `${sum.collectible.count} 件`, sub: `${sum.collectible.kinds} 种 · 价值 ${fmt(sum.collectible.value)}`, tone: 'amber' })}
         ${statCard({ label: '材料', value: `${sum.material.count} 个`, sub: `${sum.material.kinds} 种 · 价值 ${fmt(sum.material.value)}`, tone: 'sky' })}
         ${statCard({ label: '哈夫币', value: fmt(s.currency.hafCoin), sub: '出售所得直接入账', tone: 'sand' })}
+      </div>
+      <div class="px-3 pb-3 flex flex-wrap items-center gap-2 text-[10px]">
+        ${bonuses.batchSell
+          ? `<button data-action="wh-batch-sell" data-cat="${cat}"
+               class="btn clip-tab px-3 py-1.5 border border-rust/40 text-rust hover:bg-rust/15">批量出售当前分类</button>`
+          : '<span class="text-sand/35">仓储中心 5 级解锁批量出售</span>'}
+        ${bonuses.autoSort
+          ? `<button data-action="wh-auto-sort"
+               class="btn clip-tab px-3 py-1.5 border border-delta/40 text-delta hover:bg-delta/15">自动整理</button>`
+          : '<span class="text-sand/35">仓储中心 8 级解锁自动整理</span>'}
+        <span class="text-sand/35 ml-auto">每件装备占 1 格；同模板弹药、材料与收藏品各占 1 格</span>
       </div>
     </section>
 
@@ -75,7 +98,11 @@ export function renderWarehousePanel() {
 
 function renderAmmoCat(s) {
   const list = shopAmmoList(s).filter((t) => t.stock > 0);
-  if (!list.length) {
+  const legacy = Object.entries(s?.ammo || {})
+    .filter(([id, count]) => !getAmmo(id) && Number(count) > 0)
+    .map(([id, count]) => ({ id, stock: Math.floor(Number(count)), legacy: true }));
+  const all = [...list, ...legacy];
+  if (!all.length) {
     return emptyState('仓库内没有弹药。弹药按发计价，可在「装备配置 · 弹药」页采购', '🧨');
   }
   const picked = normalizeAmmoLoadout(s);
@@ -86,22 +113,22 @@ function renderAmmoCat(s) {
       出发时按「携带发数」从仓库出库，撤离成功时未打完的弹药会退回；撤离失败则随其他物资一并损失。
     </p>
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2">
-      ${list.map((t) => `
-        <article class="clip-tab bg-panel2 border ${picked.ammoId === t.id ? 'border-delta' : `bd-${t.rarity}`} px-3 py-2.5">
+      ${all.map((t) => `
+        <article class="clip-tab bg-panel2 border ${t.legacy ? 'border-rust/50' : (picked.ammoId === t.id ? 'border-delta' : `bd-${t.rarity}`)} px-3 py-2.5">
           <div class="flex items-start gap-3">
-            ${itemArt({ ...t, kind: 'ammo' }, { size: 'lg' })}
+            ${itemArt(t.legacy ? { kind: 'ammo', name: '未知弹药' } : { ...t, kind: 'ammo' }, { size: 'lg' })}
             <div class="min-w-0 grow">
               <div class="flex items-center justify-between gap-2">
-                <span class="text-xs rar-${t.rarity} truncate">${esc(t.name)}</span>
-                <span class="text-[10px] px-1.5 py-0.5 border border-delta/50 text-delta clip-tab shrink-0">${t.level} 级</span>
+                <span class="text-xs ${t.legacy ? 'text-rust' : `rar-${t.rarity}`} truncate">${esc(t.legacy ? `未知弹药 · ${t.id}` : t.name)}</span>
+                <span class="text-[10px] px-1.5 py-0.5 border ${t.legacy ? 'border-rust/50 text-rust' : 'border-delta/50 text-delta'} clip-tab shrink-0">${t.legacy ? '旧版' : `${t.level} 级`}</span>
               </div>
-              <p class="text-[10px] text-sand/45 mt-0.5">${esc(RARITY_META[t.rarity].name)} · 库存 ${fmt(t.stock)} 发</p>
-              <p class="text-[10px] text-delta mt-0.5">单发价值 ${fmt(t.valuePerRound)} · 总价值 ${fmt(t.valuePerRound * t.stock)}</p>
+              <p class="text-[10px] text-sand/45 mt-0.5">${t.legacy ? '模板已移除' : esc(RARITY_META[t.rarity].name)} · 库存 ${fmt(t.stock)} 发</p>
+              <p class="text-[10px] ${t.legacy ? 'text-rust' : 'text-delta'} mt-0.5">${t.legacy ? '不可携带，只能明确丢弃' : `单发价值 ${fmt(t.valuePerRound)} · 总价值 ${fmt(t.valuePerRound * t.stock)}`}</p>
             </div>
           </div>
-          ${picked.ammoId === t.id ? `<p class="text-[10px] text-delta mt-1">本轮携带 ${fmt(picked.rounds)} 发</p>` : ''}
-          <button data-action="wh-sell-ammo" data-tpl="${t.id}"
-            class="btn w-full clip-tab text-[10px] py-1 mt-2 border border-rust/40 text-rust hover:bg-rust/15">出售 30 发</button>
+          ${!t.legacy && picked.ammoId === t.id ? `<p class="text-[10px] text-delta mt-1">本轮携带 ${fmt(picked.rounds)} 发</p>` : ''}
+          <button data-action="${t.legacy ? 'wh-discard-legacy-ammo' : 'wh-sell-ammo'}" data-tpl="${esc(t.id)}"
+            class="btn w-full clip-tab text-[10px] py-1 mt-2 border border-rust/40 text-rust hover:bg-rust/15">${t.legacy ? '丢弃该旧版弹药堆叠' : '出售 30 发'}</button>
         </article>
       `).join('')}
     </div>
@@ -151,7 +178,10 @@ function renderEquipCat(s) {
                     </div>
                   </div>
                   <div class="flex gap-2 mt-2">
-                    ${it.equipped
+                    ${it.legacy
+                      ? `<span class="flex-1 text-[10px] text-rust py-1">模板已移除，不可装备</span>
+                         <button data-action="wh-discard-legacy-eq" data-uid="${esc(it.uid)}" class="btn clip-tab text-[10px] py-1 px-2 border border-rust/40 text-rust hover:bg-rust/15">丢弃</button>`
+                      : it.equipped
                       ? `<span class="flex-1 text-center text-[10px] text-delta py-1 truncate">${esc(nameOf(it.holder))} 携带中</span>
                          ${target && it.holder !== target ? `<button data-action="eq-equip-uid" data-uid="${it.uid}" class="btn clip-tab text-[10px] py-1 px-2 border border-delta/40 text-delta hover:bg-delta/15">转给${esc(targetName)}</button>` : ''}`
                       : `<button data-action="eq-equip-uid" data-uid="${it.uid}" ${target ? '' : 'disabled'} class="btn flex-1 clip-tab text-[10px] py-1 border border-delta/50 text-delta hover:bg-delta/15">装备</button>
@@ -188,6 +218,7 @@ function renderCollectCat(s) {
           </div>
           <p class="text-[10px] text-sand/40 mt-0.5">${esc(it.rarityName)} · ${esc(it.kindName)}</p>
           <p class="text-[10px] text-sand/45 mt-1.5 leading-snug line-clamp-2">${esc(it.desc)}</p>
+          ${protectedCollectibleCount(it.id, s) ? `<p class="protected-red-badge mt-1.5">🔒 首件保护 · 可用重复件 ${consumableCollectibleCount(it.id, s)}</p>` : ''}
           <div class="flex items-center justify-between gap-2 mt-2">
             <span class="text-[10px] text-delta">总价值 ${fmt(it.total)}</span>
             <span class="text-[10px] text-sand/35">单件 ${fmt(it.value)}</span>
@@ -195,7 +226,7 @@ function renderCollectCat(s) {
           <div class="flex gap-2 mt-2">
             <button data-action="wh-col-detail" data-id="${it.id}"
               class="btn flex-1 clip-tab text-[10px] py-1 border border-line text-sand/60 hover:text-sand">详情</button>
-            <button data-action="wh-sell-col" data-id="${it.id}"
+            <button data-action="wh-sell-col" data-id="${it.id}" ${consumableCollectibleCount(it.id, s) <= 0 ? 'disabled' : ''}
               class="btn clip-tab text-[10px] py-1 px-2 border border-rust/40 text-rust hover:bg-rust/15">出售 1 件</button>
           </div>
         </article>
@@ -249,6 +280,18 @@ export async function handleWarehouseSellEquipment(uidStr) {
   toast(r.msg, r.ok ? 'ok' : 'err');
 }
 
+export async function handleDiscardLegacyEquipment(uidStr) {
+  const ok = await confirmDialog({
+    title: '丢弃未知旧版装备',
+    body: '该装备模板已不存在，无法使用或估价。丢弃后不可恢复，是否继续？',
+    okText: '确认丢弃',
+    danger: true
+  });
+  if (!ok) return;
+  const result = discardLegacyEquipment(uidStr);
+  toast(result.msg, result.ok ? 'ok' : 'err');
+}
+
 export async function handleSellCollectible(id) {
   const ok = await confirmDialog({
     title: '出售收藏品',
@@ -283,6 +326,36 @@ export async function handleWarehouseSellAmmo(ammoId) {
   if (!ok) return;
   const r = sellAmmo(ammoId, 30);
   toast(r.msg, r.ok ? 'ok' : 'err');
+}
+
+export async function handleDiscardLegacyAmmo(ammoId) {
+  const ok = await confirmDialog({
+    title: '丢弃未知旧版弹药',
+    body: '该弹药模板已不存在，无法携带或估价。将丢弃整个堆叠，是否继续？',
+    okText: '确认丢弃',
+    danger: true
+  });
+  if (!ok) return;
+  const result = discardLegacyAmmo(ammoId);
+  toast(result.msg, result.ok ? 'ok' : 'err');
+}
+
+export async function handleWarehouseBatchSell(category = cat) {
+  const categoryName = CATS.find((item) => item.id === category)?.name || '当前分类';
+  const ok = await confirmDialog({
+    title: `批量出售${categoryName}`,
+    body: `将出售${categoryName}中的全部可出售物品。携带中的装备和受保护的首件大红会保留。是否继续？`,
+    okText: '确认批量出售',
+    danger: true
+  });
+  if (!ok) return;
+  const result = batchSellWarehouseCategory(category);
+  toast(result.msg, result.ok ? 'ok' : 'err');
+}
+
+export function handleWarehouseAutoSort() {
+  const result = autoSortWarehouse();
+  toast(result.msg, result.ok ? 'ok' : 'err');
 }
 
 export function handleCollectibleDetail(id) {

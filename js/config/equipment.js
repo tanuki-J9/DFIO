@@ -43,7 +43,7 @@ export const SLOT_IDS = SLOTS.map((s) => s.id);
 export const GEAR_LEVEL = { min: 1, max: 6 };
 
 /** 需要展示与参与穿透计算的等级槽位（弹药不占装备槽，单独按发携带） */
-export const LEVELED_SLOTS = ['weapon', 'armor', 'helmet'];
+export const LEVELED_SLOTS = ['weapon', 'armor', 'helmet', 'bag'];
 
 export function clampGearLevel(lv) {
   const n = Math.round(Number(lv) || GEAR_LEVEL.min);
@@ -92,11 +92,29 @@ export function penetrationMul(ammoLevel, armorLevel) {
  * level 为 1-6 级（武器/护甲/头盔），决定穿透与被穿透关系
  */
 export const EQUIPMENT_TEMPLATES = [
+  { id: 'w_car15', slot: 'weapon', name: 'CAR-15 突击步枪', rarity: RARITY.COMMON, level: 1, value: 150, atk: 15, hp: 0, def: 0, price: 220 },
+  { id: 'w_uzi', slot: 'weapon', name: 'UZI 冲锋枪', rarity: RARITY.COMMON, level: 1, value: 135, atk: 13, hp: 0, def: 1, price: 200 },
+  { id: 'w_bizon', slot: 'weapon', name: 'Bizon 冲锋枪', rarity: RARITY.COMMON, level: 1, value: 165, atk: 14, hp: 12, def: 0, price: 245 },
+
   { id: 'w_ak', slot: 'weapon', name: 'AKM 突击步枪', rarity: RARITY.COMMON, level: 2, value: 320, atk: 24, hp: 0, def: 0, price: 480 },
-  { id: 'w_m4', slot: 'weapon', name: 'M4A1 卡宾枪', rarity: RARITY.RARE, level: 3, value: 780, atk: 46, hp: 0, def: 2, price: 1150 },
+  { id: 'w_mp5', slot: 'weapon', name: 'MP5 冲锋枪', rarity: RARITY.COMMON, level: 2, value: 300, atk: 21, hp: 0, def: 3, price: 450 },
+  { id: 'w_s12k', slot: 'weapon', name: 'S12K 霰弹枪', rarity: RARITY.COMMON, level: 2, value: 350, atk: 28, hp: 10, def: 0, price: 520 },
+
+  { id: 'w_m4', slot: 'weapon', name: 'M4A1 突击步枪', rarity: RARITY.RARE, level: 3, value: 780, atk: 46, hp: 0, def: 2, price: 1150 },
+  { id: 'w_ak12', slot: 'weapon', name: 'AK-12 突击步枪', rarity: RARITY.RARE, level: 3, value: 830, atk: 50, hp: 0, def: 0, price: 1220 },
+  { id: 'w_smg45', slot: 'weapon', name: 'SMG-45 冲锋枪', rarity: RARITY.RARE, level: 3, value: 730, atk: 42, hp: 0, def: 5, price: 1080 },
+
   { id: 'w_sr', slot: 'weapon', name: 'SR-25 精确射手步枪', rarity: RARITY.EPIC, level: 4, value: 2100, atk: 92, hp: 0, def: 4, price: 3200 },
+  { id: 'w_k416', slot: 'weapon', name: 'K416 突击步枪', rarity: RARITY.EPIC, level: 4, value: 1980, atk: 84, hp: 0, def: 8, price: 3000 },
+  { id: 'w_m14', slot: 'weapon', name: 'M14 精确射手步枪', rarity: RARITY.EPIC, level: 4, value: 2280, atk: 101, hp: 15, def: 2, price: 3450 },
+
   { id: 'w_mg', slot: 'weapon', name: 'M250 通用机枪', rarity: RARITY.LEGEND, level: 5, value: 5400, atk: 168, hp: 40, def: 8, price: 8600 },
-  { id: 'w_rail', slot: 'weapon', name: '「审判」电磁狙击枪', rarity: RARITY.RED, level: 6, value: 11200, atk: 286, hp: 60, def: 12, price: 17800 },
+  { id: 'w_pkm', slot: 'weapon', name: 'PKM 通用机枪', rarity: RARITY.LEGEND, level: 5, value: 5700, atk: 178, hp: 55, def: 5, price: 9000 },
+  { id: 'w_ash12', slot: 'weapon', name: 'ASh-12 战斗步枪', rarity: RARITY.LEGEND, level: 5, value: 6100, atk: 194, hp: 20, def: 4, price: 9600 },
+
+  { id: 'w_rail', slot: 'weapon', name: 'M82A1 狙击步枪', rarity: RARITY.RED, level: 6, value: 11200, atk: 286, hp: 60, def: 12, price: 17800 },
+  { id: 'w_r93', slot: 'weapon', name: 'R93 狙击步枪', rarity: RARITY.RED, level: 6, value: 10500, atk: 268, hp: 25, def: 16, price: 16800 },
+  { id: 'w_m7', slot: 'weapon', name: 'M7 战斗步枪', rarity: RARITY.RED, level: 6, value: 11800, atk: 302, hp: 45, def: 8, price: 18600 },
 
   { id: 'a_t2', slot: 'armor', name: '2 级战术背心', rarity: RARITY.COMMON, level: 2, value: 150, atk: 0, hp: 55, def: 8, price: 240 },
   { id: 'a_t3', slot: 'armor', name: '3 级复合防弹衣', rarity: RARITY.COMMON, level: 3, value: 260, atk: 0, hp: 90, def: 14, price: 400 },
@@ -110,16 +128,66 @@ export const EQUIPMENT_TEMPLATES = [
   { id: 'h_t5', slot: 'helmet', name: 'H90 重型防弹头盔', rarity: RARITY.EPIC, level: 5, value: 1400, atk: 0, hp: 230, def: 46, price: 2100 },
   { id: 'h_t6', slot: 'helmet', name: '「铁壁」全覆式头盔', rarity: RARITY.LEGEND, level: 6, value: 3600, atk: 6, hp: 470, def: 88, price: 5600 },
 
-  { id: 'b_s', slot: 'bag', name: '轻型突击背包', rarity: RARITY.COMMON, value: 140, atk: 0, hp: 20, def: 2, price: 220 },
-  { id: 'b_m', slot: 'bag', name: '战术模块背包', rarity: RARITY.RARE, value: 430, atk: 4, hp: 50, def: 6, price: 640 },
-  { id: 'b_l', slot: 'bag', name: '远征大容量背包', rarity: RARITY.EPIC, value: 1180, atk: 8, hp: 110, def: 12, price: 1750 },
-  { id: 'b_x', slot: 'bag', name: '「驮兽」超载背包', rarity: RARITY.LEGEND, value: 3100, atk: 16, hp: 220, def: 24, price: 4800 },
+  { id: 'b_s', slot: 'bag', name: '1 级轻型挎包', rarity: RARITY.COMMON, level: 1, capacity: 6, value: 90, atk: 0, hp: 10, def: 1, price: 140 },
+  { id: 'b_m', slot: 'bag', name: '2 级突击背包', rarity: RARITY.COMMON, level: 2, capacity: 9, value: 180, atk: 0, hp: 20, def: 2, price: 280 },
+  { id: 'b_l', slot: 'bag', name: '3 级战术背包', rarity: RARITY.RARE, level: 3, capacity: 12, value: 430, atk: 2, hp: 45, def: 5, price: 640 },
+  { id: 'b_x', slot: 'bag', name: '4 级远征背包', rarity: RARITY.EPIC, level: 4, capacity: 16, value: 1180, atk: 6, hp: 95, def: 10, price: 1750 },
+  { id: 'b_t5', slot: 'bag', name: '5 级重装行军包', rarity: RARITY.LEGEND, level: 5, capacity: 20, value: 3100, atk: 12, hp: 190, def: 20, price: 4800 },
+  { id: 'b_t6', slot: 'bag', name: '6 级「驮兽」超载背包', rarity: RARITY.RED, level: 6, capacity: 24, value: 6200, atk: 20, hp: 320, def: 34, price: 9600 },
 
-  { id: 't_med', slot: 'tactical', name: '急救包组', rarity: RARITY.COMMON, value: 120, atk: 0, hp: 60, def: 4, price: 200 },
+  {
+    id: 't_med', slot: 'tactical', name: '急救包组', rarity: RARITY.COMMON,
+    value: 120, atk: 0, hp: 60, def: 4, price: 200,
+    healing: { triggerRatio: 0.5, healRatio: 0.18, baseUses: 1 }
+  },
   { id: 't_gre', slot: 'tactical', name: '高爆手雷组', rarity: RARITY.RARE, value: 380, atk: 22, hp: 0, def: 0, price: 580 },
   { id: 't_dro', slot: 'tactical', name: '侦察无人机', rarity: RARITY.EPIC, value: 1020, atk: 34, hp: 60, def: 8, price: 1600 },
   { id: 't_air', slot: 'tactical', name: '「雷霆」空袭信标', rarity: RARITY.LEGEND, value: 2800, atk: 96, hp: 100, def: 14, price: 4400 }
 ];
+
+/**
+ * 装备经济重标：保留各装备原始强弱差异，将同级整套价值对齐原地图门槛。
+ * 三级均装约 12.5 万、四级约 65 万、五级约 105 万。
+ */
+export const GEAR_SET_VALUE_TARGET = {
+  1: 20000,
+  2: 60000,
+  3: 125000,
+  4: 650000,
+  5: 1050000,
+  6: 1800000
+};
+
+const GEAR_VALUE_SHARE = { weapon: 0.50, armor: 0.22, helmet: 0.12, bag: 0.16 };
+const TACTICAL_VALUE_BY_RARITY = {
+  [RARITY.COMMON]: 5000,
+  [RARITY.RARE]: 15000,
+  [RARITY.EPIC]: 45000,
+  [RARITY.LEGEND]: 120000,
+  [RARITY.RED]: 240000
+};
+
+function roundEconomy(value) {
+  return Math.max(100, Math.round(value / 100) * 100);
+}
+
+Object.entries(GEAR_VALUE_SHARE).forEach(([slot, share]) => {
+  for (let level = GEAR_LEVEL.min; level <= GEAR_LEVEL.max; level += 1) {
+    const group = EQUIPMENT_TEMPLATES.filter((item) => item.slot === slot && item.level === level);
+    if (!group.length) continue;
+    const average = group.reduce((sum, item) => sum + item.value, 0) / group.length;
+    group.forEach((item) => {
+      const variation = Math.min(1.12, Math.max(0.88, item.value / average));
+      item.value = roundEconomy(GEAR_SET_VALUE_TARGET[level] * share * variation);
+      item.price = roundEconomy(item.value * 1.28);
+    });
+  }
+});
+
+EQUIPMENT_TEMPLATES.filter((item) => item.slot === 'tactical').forEach((item) => {
+  item.value = TACTICAL_VALUE_BY_RARITY[item.rarity] || 5000;
+  item.price = roundEconomy(item.value * 1.28);
+});
 
 /**
  * 弹药类型

@@ -7,6 +7,7 @@
 import { getState, notify } from '../../core/state.js';
 import { fmt, esc, fmtClock } from '../../core/utils.js';
 import { galleryView, isDiscovered } from '../../systems/collection.js';
+import { protectedCollectibleCount } from '../../systems/base.js';
 import { toast, emptyState, statCard, openPanel, progressBar } from '../components.js';
 
 /** 当前展开的系列；null 表示全部系列平铺 */
@@ -16,8 +17,7 @@ export function setGallerySeries(id) {
   activeSeries = id || null;
 }
 
-export function renderGalleryPanel() {
-  const s = getState();
+export function renderGalleryPanel(s = getState()) {
   const view = galleryView(s);
   const series = activeSeries
     ? view.series.filter((g) => g.id === activeSeries)
@@ -60,11 +60,11 @@ export function renderGalleryPanel() {
       `).join('')}
     </div>
 
-    ${series.length ? series.map(renderSeries).join('') : emptyState('该系列暂无条目', '📭')}
+    ${series.length ? series.map((group) => renderSeries(group, s)).join('') : emptyState('该系列暂无条目', '📭')}
   `;
 }
 
-function renderSeries(g) {
+function renderSeries(g, s) {
   return `
     <section class="mb-5">
       <header class="flex items-baseline justify-between gap-3 mb-2">
@@ -75,14 +75,15 @@ function renderSeries(g) {
         <span class="text-[10px] ${g.owned ? 'text-delta' : 'text-sand/35'} shrink-0">${g.owned} / ${g.total}</span>
       </header>
       <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2">
-        ${g.entries.map((e) => renderEntry(e)).join('')}
+        ${g.entries.map((e) => renderEntry(e, s)).join('')}
       </div>
     </section>
   `;
 }
 
-function renderEntry(e) {
+function renderEntry(e, s) {
   const on = e.discovered;
+  const protectedFirst = e.refType === 'collectible' && protectedCollectibleCount(e.id, s) > 0;
   return `
     <button data-action="gl-entry" data-id="${e.id}"
       class="btn gl-card clip-tab text-left border ${on ? `bd-${e.rarity}` : 'border-dashed border-line'} ${on ? 'bg-panel2 gl-on' : 'bg-panel/60'} px-3 py-2.5">
@@ -93,6 +94,7 @@ function renderEntry(e) {
       <span class="block text-[10px] text-sand/35 mt-0.5 truncate">
         ${on ? `${esc(e.rarityName)} · ${esc(e.kindName || '')}` : '尚未获得'}
       </span>
+      ${protectedFirst ? '<span class="protected-red-badge">🔒 首件保护</span>' : ''}
       <span class="flex items-center justify-between gap-2 mt-1.5">
         <span class="text-[10px] ${on ? 'text-delta' : 'text-sand/25'}">${on ? `价值 ${fmt(e.value)}` : '— —'}</span>
         ${on && e.count > 1 ? `<span class="text-[10px] text-amber-400">×${e.count}</span>` : ''}

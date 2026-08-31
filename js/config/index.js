@@ -13,3 +13,4 @@ export * from './skills.js';
 export * from './enemies.js';
 export * from './battle.js';
 export * from './operatorSkills.js';
+export * from './base.js';

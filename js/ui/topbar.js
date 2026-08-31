@@ -7,7 +7,7 @@ import { fmt } from '../core/utils.js';
 import { getReadiness } from '../systems/readiness.js';
 import { openPanel, delegate, emptyState } from './components.js';
 import { readinessBreakdown } from '../systems/readiness.js';
-import { RARITY_META } from '../config/index.js';
+import { COMMANDER_XP_PER_LEVEL, RARITY_META } from '../config/index.js';
 
 let root = null;
 let lastSignature = '';
@@ -49,16 +49,30 @@ export function renderTopbar() {
   if (!box) return;
   const s = getState();
   const readiness = getReadiness(s);
-  const sig = `${s.currency.hafCoin}|${s.currency.deltaCoin}|${readiness}|${s.view}`;
+  const sig = `${s.currency.hafCoin}|${s.currency.deltaCoin}|${readiness}|${s.commander?.level}|${s.commander?.currentXp}|${s.view}`;
   if (sig === lastSignature) return;
   lastSignature = sig;
 
-  box.innerHTML = `
+  box.innerHTML = renderTopbarInfo(s, readiness);
+}
+
+export function renderTopbarInfo(s, readiness) {
+  const level = Math.max(1, Math.min(30, Number(s?.commander?.level) || 1));
+  const currentXp = Math.max(0, Number(s?.commander?.currentXp) || 0);
+  const requiredXp = level >= 30 ? 0 : COMMANDER_XP_PER_LEVEL[level - 1];
+  return `
     <div class="clip-tab bg-panel2 border border-line px-2 md:px-3 py-1.5 flex items-center gap-1.5">
       <span class="text-amber-400 text-sm">🪙</span>
       <div class="leading-none">
         <p class="text-[9px] text-sand/40">哈夫币</p>
         <p class="text-xs text-amber-400">${fmt(s.currency.hafCoin)}</p>
+      </div>
+    </div>
+    <div class="clip-tab bg-panel2 border border-line px-2 md:px-3 py-1.5 hidden md:flex items-center gap-1.5">
+      <span class="text-delta text-sm">⌘</span>
+      <div class="leading-none">
+        <p class="text-[9px] text-sand/40">指挥官</p>
+        <p class="text-xs text-delta">Lv.${level} <span class="text-[9px] text-sand/35">${requiredXp ? `${fmt(currentXp)}/${fmt(requiredXp)}` : 'MAX'}</span></p>
       </div>
     </div>
     <div class="clip-tab bg-panel2 border border-line px-2 md:px-3 py-1.5 flex items-center gap-1.5">

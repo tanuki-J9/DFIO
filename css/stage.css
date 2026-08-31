@@ -481,6 +481,7 @@
 .fx-dmg-in  { color: #ff5c3d; }
 .fx-loot    { color: #c8ff3d; }
 .fx-heal    { color: #6fe89a; }
+.fx-medical { color: #7ef9d8; font-weight: 700; }
 .fx-crit    { color: #ffc23d; font-size: 14px; }
 
 /* 击中闪白 */

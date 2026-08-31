@@ -4,7 +4,7 @@
  * 不渲染任何养成操作面板（需求 4.7 / 4.10）
  */
 
-import { MAPS, DIFFICULTY_META } from '../../config/index.js';
+import { MAPS, DIFFICULTY_META, getBranch } from '../../config/index.js';
 import { getState, PHASE } from '../../core/state.js';
 import { fmt, fmtTime, fmtClock, esc } from '../../core/utils.js';
 import { remaining, isWarning, isRisky, extractProgress, extractDuration } from '../../systems/extraction.js';
@@ -13,6 +13,7 @@ import { ammoView } from '../../systems/ammo.js';
 import { nodeLabel } from '../../systems/march.js';
 import { safeboxView } from '../../systems/safebox.js';
 import { reviveRuntimeView } from '../../systems/operatorSkills.js';
+import { previewIntelNodes } from '../../systems/nodePlan.js';
 import { progressBar, statCard, emptyState } from '../components.js';
 
 const LOG_STYLE = {
@@ -59,6 +60,9 @@ export function renderHeader(s, now) {
   const risky = isRisky(s, now);
   const ammo = ammoView(run.ammo);
   const revive = reviveRuntimeView(run, now);
+  const branch = getBranch(run.mapId, run.difficulty);
+  const preview = previewIntelNodes(run, branch);
+  const previewLabel = { crate: '补给箱', enemy: '敌情', boss: '首领' };
 
   return `
     <section class="clip-corner bg-panel border ${warn ? 'border-rust/60' : 'border-line'}">
@@ -66,6 +70,7 @@ export function renderHeader(s, now) {
         <div class="min-w-0">
           <h2 class="text-sm text-delta tracking-wider truncate">${esc(map?.name || '战区')} · ${esc(meta?.name || '')}</h2>
           <p class="text-[10px] text-sand/45 mt-0.5">${esc(nodeLabel(run))} · 节点 ${run.nodeIndex}</p>
+          ${preview.length ? `<p class="text-[10px] text-sky-400 mt-1">情报预览 · ${preview.map((type, index) => `${index + 1}. ${previewLabel[type] || '未知'}`).join(' · ')}</p>` : ''}
         </div>
         <div class="text-right">
           <p class="text-[10px] text-sand/45">剩余行动时限</p>
@@ -168,7 +173,7 @@ export function renderCarry(s) {
     <section class="clip-corner bg-panel border border-delta/40">
       <header class="px-4 py-2.5 border-b border-line flex items-center justify-between">
         <h3 class="text-xs text-delta tracking-wider">本轮携带物资</h3>
-        <span class="text-[10px] text-sand/45">${run.carry.items.length} 项</span>
+        <span class="text-[10px] text-sand/45">背包容量 ${run.carry.items.length}/${Number.isFinite(run.bagCapacity) ? run.bagCapacity : '∞'} 格</span>
       </header>
       <div class="px-4 py-3">
         <p class="text-[10px] text-sand/45">累计价值（撤离决策依据）</p>

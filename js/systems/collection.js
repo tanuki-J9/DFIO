@@ -17,6 +17,7 @@ import {
 import { getState, notify } from '../core/state.js';
 import { nonNegInt, num } from '../core/utils.js';
 import { allEquippedUids, holderOf } from './equipment.js';
+import { consumableCollectibleCount } from './base.js';
 
 /* ============ 收藏室图鉴 ============ */
 
@@ -105,7 +106,9 @@ export function sellCollectible(id, count = 1, s = getState()) {
   if (!tpl) return { ok: false, msg: '该收藏品不存在' };
   const have = nonNegInt(s.collectibles[id], 0);
   if (have <= 0) return { ok: false, msg: '仓库中没有该收藏品' };
-  const n = Math.min(have, Math.max(1, nonNegInt(count, 1)));
+  const consumable = consumableCollectibleCount(id, s);
+  if (consumable <= 0) return { ok: false, msg: '首件大红受收藏保护，无法出售' };
+  const n = Math.min(consumable, Math.max(1, nonNegInt(count, 1)));
   const gain = Math.round(num(tpl.value, 0) * n);
   s.collectibles[id] = have - n;
   if (s.collectibles[id] <= 0) delete s.collectibles[id];
@@ -119,13 +122,29 @@ export function sellCollectible(id, count = 1, s = getState()) {
 /** 装备分类：按槽位分组 */
 export function warehouseEquipment(s = getState()) {
   const equipped = allEquippedUids(s);
-  return SLOTS.map((slot) => ({
+  const warehouseSlots = [...SLOTS, { id: 'legacy', name: '未知装备', icon: '⚠️' }];
+  return warehouseSlots.map((slot) => ({
     slot,
     items: s.inventory
       .filter((it) => it.slot === slot.id)
       .map((it) => {
         const tpl = getTemplate(it.tplId);
-        if (!tpl) return null;
+        if (!tpl) {
+          return {
+            uid: it.uid,
+            tplId: it.tplId,
+            name: `未知装备 · ${it.tplId}`,
+            rarity: RARITY.COMMON,
+            rarityName: '未知',
+            value: 0,
+            atk: 0,
+            hp: 0,
+            def: 0,
+            equipped: false,
+            holder: null,
+            legacy: true
+          };
+        }
         return {
           uid: it.uid,
           tplId: it.tplId,
@@ -137,10 +156,10 @@ export function warehouseEquipment(s = getState()) {
           hp: num(tpl.hp, 0),
           def: num(tpl.def, 0),
           equipped: equipped.has(it.uid),
-          holder: equipped.has(it.uid) ? holderOf(it.uid, s) : null
+          holder: equipped.has(it.uid) ? holderOf(it.uid, s) : null,
+          legacy: false
         };
       })
-      .filter(Boolean)
       .sort((a, b) => b.value - a.value)
   }));
 }
